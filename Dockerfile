@@ -15,6 +15,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 RUN python -m pip install --no-cache-dir 'psycopg[binary]>=3.2,<3.3'
 COPY server.py worker.py agent_codegen.py history.py job_queue.py ./
+COPY .agents/skills/strategy-lab-script/SKILL.md ./.agents/skills/strategy-lab-script/SKILL.md
 COPY custom/ ./custom/
 COPY go.mod ./
 COPY engine/ ./engine/

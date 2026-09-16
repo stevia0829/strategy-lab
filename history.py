@@ -19,7 +19,10 @@ CREATE TABLE IF NOT EXISTS backtest_runs (
 
 
 def save_run(bundle):
-    from psycopg.types.json import Jsonb
+    try:
+        from psycopg.types.json import Jsonb
+    except ImportError:
+        raise ValueError('历史记录需要 PostgreSQL 驱动 psycopg；本次回测报告仍可下载') from None
     run_id = str(uuid.uuid4())
     with connect_db() as conn:
         conn.execute(SCHEMA)

@@ -1,5 +1,8 @@
-"""Fixed-endpoint, user-key-funded code generation; never stores API keys."""
+"""Skill-guided, fixed-endpoint code generation; never stores API keys."""
+import ast
+import hashlib
 import json
+from pathlib import Path
 import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -11,6 +14,52 @@ PROVIDERS = {
     'glm': ('https://open.bigmodel.cn/api/paas/v4/chat/completions', 'glm-5.2'),
     'kimi': ('https://api.moonshot.cn/v1/chat/completions', 'kimi-k2.6'),
 }
+SKILL_NAME = 'strategy-lab-script'
+SKILL_PATH = Path(__file__).resolve().parent / '.agents' / 'skills' / SKILL_NAME / 'SKILL.md'
+
+
+def skill_instructions():
+    source = SKILL_PATH.read_text(encoding='utf-8')
+    match = re.match(r'\A---\n.*?\n---\n(.+)\Z', source, flags=re.S)
+    if not match:
+        raise ValueError('策略生成 Skill 缺少有效说明')
+    body = match.group(1).strip()
+    if not body or len(body) > 12_000:
+        raise ValueError('策略生成 Skill 内容无效')
+    return body
+
+
+def generation_context(payload):
+    context = payload.get('context')
+    if context is None:
+        return ''
+    if not isinstance(context, dict):
+        raise ValueError('策略上下文格式无效')
+    universe = context.get('universe')
+    benchmark = context.get('benchmark')
+    limit = context.get('max_positions')
+    valid_code = lambda value: isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,32}', value)
+    if (not isinstance(universe, list) or not 1 <= len(universe) <= 100
+            or not all(valid_code(code) for code in universe)
+            or len(set(universe)) != len(universe)
+            or not valid_code(benchmark)
+            or type(limit) is not int or not 1 <= limit <= len(universe)):
+        raise ValueError('请先填写有效的资产池、基准和最大持仓数')
+    return ('\n本次回测配置：资产池 ' + ', '.join(universe) + '；基准 ' + benchmark
+            + '；最多持仓 ' + str(limit) + '。生成的目标代码只能取自资产池。')
+
+
+def check_draft(code, engine):
+    if engine == 'python':
+        try:
+            tree = ast.parse(code)
+        except SyntaxError as error:
+            raise ValueError('模型生成的 Python 代码有语法错误：第 ' + str(error.lineno) + ' 行')
+        if not any(isinstance(node, ast.FunctionDef) and node.name == 'decide' for node in tree.body):
+            raise ValueError('模型没有生成顶层 def decide(ctx) 函数')
+    elif not re.search(r'(?m)^\s*package\s+main\s*$', code) or not re.search(
+            r'\bfunc\s+Decide\s*\(', code):
+        raise ValueError('模型没有生成完整的 Go Decide 策略')
 
 
 def generate(payload, *, opener=urlopen):
@@ -30,18 +79,11 @@ def generate(payload, *, opener=urlopen):
     model = payload.get('model') or default_model
     if not isinstance(model, str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', model):
         raise ValueError('模型 ID 格式无效')
-    if engine == 'python':
-        contract = ("Only return runnable Python source. Define def decide(ctx): returning a list of target symbols. "
-                    "ctx is a dict with date, history, positions, cash, equity. history maps symbols to past-and-current OHLCV bar dicts. "
-                    "Use from strategylab.engine import indicator for RSI/MACD/SMA. No jqdata. No network or file access. "
-                    "Do not use any future bars. Example: def decide(ctx): return ['510300'] if ctx['history']['510300'] else [].")
-    else:
-        contract = ("Only return runnable Go source with package main and func Decide(ctx engine.Context) []string. "
-                    "Import strategylab/engine. Context has Date string, History map[string][]engine.Bar, Positions map[string]int, Cash and Equity float64. "
-                    "Use engine.Calculate(bars, engine.Indicator{Kind: \"rsi\", Period: 14}) for indicators. "
-                    "No network or file access. No future bars. Return []string of target symbols or nil for cash.")
+    instructions = skill_instructions()
+    context = generation_context(payload)
     body = {'model': model, 'stream': False, 'messages': [
-        {'role': 'system', 'content': contract + ' The engine trades targets at the next session open; return code only, without Markdown.'},
+        {'role': 'system', 'content': instructions + context + '\n本次只返回完整的 ' + engine
+         + ' 源代码，不要 Markdown 围栏或解释。'},
         {'role': 'user', 'content': prompt}]}
     request = Request(endpoint, data=json.dumps(body, ensure_ascii=False).encode(),
                       headers={'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'})
@@ -67,4 +109,6 @@ def generate(payload, *, opener=urlopen):
         code = match.group(1).strip()
     if not code or len(code.encode()) > 100_000:
         raise ValueError('模型返回的代码为空或过长')
-    return {'code': code, 'provider': provider, 'model': model, 'engine': engine}
+    check_draft(code, engine)
+    return {'code': code, 'provider': provider, 'model': model, 'engine': engine,
+            'skill': SKILL_NAME, 'skill_sha256': hashlib.sha256(instructions.encode()).hexdigest()}

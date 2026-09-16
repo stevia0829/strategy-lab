@@ -165,9 +165,9 @@ $('code-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)retu
 $('export-code').onclick=()=>download('strategy.'+($('code-engine').value==='go'?'go':'py'),$('user-code').value,'text/plain');
 $('agent-provider').onchange=()=>{$('agent-model').value=agentModels[$('agent-provider').value];};
 $('agent-generate').onclick=async()=>{const button=$('agent-generate');button.disabled=true;button.textContent='生成中…';
- try{const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value};
+ try{const config=collect();const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value,context:{universe:config.universe,benchmark:config.benchmark,max_positions:config.selection.max_positions}};
   const response=await fetch('/api/agent/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'生成失败');
-  $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;setStatus('代码草稿已生成。请检查交易逻辑后再运行回测。','success');
+  $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;setStatus('已用 '+result.skill+' 生成代码草稿。请检查交易逻辑后再运行回测。','success');
  }catch(error){setStatus('生成失败：'+error.message,'error');}finally{button.disabled=false;button.textContent='生成代码草稿';}};
 $('preset').onchange=()=>{try{let old=state.config?collect():null;state.config=clone(state.presets[$('preset').value]);if(state.dataMode!=='synthetic_demo'&&old){state.config.universe=old.universe;state.config.benchmark=old.benchmark;state.config.start=old.start;state.config.end=old.end;state.config.selection.max_positions=Math.min(state.config.selection.max_positions,old.universe.length);}render();updateSourceLabel();dirty();}catch(e){setStatus(e.message,'error');}};
 document.querySelectorAll('[data-add]').forEach(el=>el.onclick=()=>{try{state.config=collect();const which=el.dataset.add;state.config[which][$(which+'-mode').value].push({left:'rsi14' in state.config.indicators?'rsi14':'close',op:'gt',right:0});renderRules(which);dirty();}catch(e){setStatus(e.message,'error');}});

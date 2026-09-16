@@ -23,7 +23,7 @@ make run
 
 ## 可以做什么
 
-- 在“策略输入”页编写 Python / Go `decide` 策略，或者用 DeepSeek、GPT、MiniMax、GLM、Kimi 生成代码草稿，检查后再运行。模型 API Key 由用户输入，不保存到历史记录。
+- 在“策略输入”页编写 Python / Go `decide` 策略，或者用 DeepSeek、GPT、MiniMax、GLM、Kimi 生成代码草稿，检查后再运行。生成过程使用项目内的策略脚本 Skill，并结合当前资产池与持仓数；模型 API Key 由用户输入，不保存到历史记录。
 - 在“简单策略”页可视化增删入场/退出条件，支持 AND、OR、指标相互比较、数值阈值、上穿/下穿。
 - 调整周期、MACD 参数、持仓数、排名方向、资金、手续费、滑点、交易单位和入场仓位上限。
 - JSON 导入/导出，支持嵌套 AND/OR/NOT；复杂表达式保留在 JSON 中，不会被界面悄悄扁平化。
@@ -134,6 +134,7 @@ web/                    无框架的可视化工作台
 server.py               本地 HTTP 服务与固定引擎进程调度
 worker.py               无网络的自写策略执行器
 agent_codegen.py        固定供应商端点的代码草稿生成
+.agents/skills/strategy-lab-script/  可复用的策略生成 Skill
 history.py              PostgreSQL 回测记录
 compose.yaml             本机 PostgreSQL 17 服务
 Dockerfile / compose.deploy.yaml  单机服务器应用与数据库部署
