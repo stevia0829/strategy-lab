@@ -11,6 +11,16 @@ import server
 
 
 class RuntimeTests(unittest.TestCase):
+    def test_login_session_is_signed_and_expires(self):
+        token = server.issue_session('local-admin-password', now=1000)
+        self.assertTrue(server.valid_session(token, 'local-admin-password', now=1001))
+        self.assertFalse(server.valid_session(token, 'wrong-password', now=1001))
+        self.assertFalse(server.valid_session(token, 'local-admin-password', now=999))
+        self.assertFalse(server.valid_session(token, 'local-admin-password',
+                                              now=1001 + server.SESSION_TTL_SECONDS))
+        self.assertFalse(server.valid_session(('A' if token[0] != 'A' else 'B') + token[1:],
+                                              'local-admin-password', now=1001))
+
     def test_python_runs_without_building_or_calling_go(self):
         strategy = json.loads((ROOT/'examples/trend.json').read_text())
         data = (ROOT/'examples/demo.csv').read_bytes().decode('utf-8')

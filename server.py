@@ -2,16 +2,21 @@
 """Strategy workbench. Runs fixed engines, never evaluates user source code."""
 import argparse
 import base64
+import binascii
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import CookieError, SimpleCookie
 import hmac
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent
@@ -22,9 +27,34 @@ from agent_codegen import generate
 from history import get_run, list_runs, save_run
 from job_queue import run_code
 SLOTS = threading.BoundedSemaphore(2)
+SESSION_TTL_SECONDS = 12 * 60 * 60
 
 
 GO_BUILD_LOCK = threading.Lock()
+
+
+def issue_session(password, now=None):
+    timestamp = int(time.time() if now is None else now)
+    message = str(timestamp) + ':' + secrets.token_hex(16)
+    signature = hmac.new(password.encode(), message.encode(), hashlib.sha256).hexdigest()
+    return base64.urlsafe_b64encode((message + ':' + signature).encode()).decode().rstrip('=')
+
+
+def valid_session(token, password, now=None):
+    if not isinstance(token, str) or len(token) > 256:
+        return False
+    try:
+        decoded = base64.urlsafe_b64decode(token + '=' * (-len(token) % 4)).decode()
+        timestamp, nonce, signature = decoded.split(':')
+        current = int(time.time() if now is None else now)
+        if (not timestamp.isdigit() or not re.fullmatch(r'[0-9a-f]{32}', nonce)
+                or not re.fullmatch(r'[0-9a-f]{64}', signature)
+                or not 0 <= current - int(timestamp) <= SESSION_TTL_SECONDS):
+            return False
+        expected = hmac.new(password.encode(), (timestamp + ':' + nonce).encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(signature, expected)
+    except (ValueError, UnicodeError):
+        return False
 
 
 def ensure_go():
@@ -73,20 +103,19 @@ class Handler(BaseHTTPRequestHandler):
         try:
             scheme, encoded = token.split(' ', 1)
             userpass = base64.b64decode(encoded, validate=True).decode() if scheme == 'Basic' else ''
-        except (ValueError, UnicodeError):
+        except (ValueError, UnicodeError, binascii.Error):
             userpass = ''
         if hmac.compare_digest(userpass, 'admin:' + password):
             return True
-        body = b'Authentication required'
-        self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="Strategy Lab"')
-        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-        self.send_header('Content-Length', str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-        return False
+        try:
+            cookies = SimpleCookie()
+            cookies.load(self.headers.get('Cookie', ''))
+            session = cookies.get('strategylab_session')
+            return bool(session and valid_session(session.value, password))
+        except CookieError:
+            return False
 
-    def send(self, status, body, mime='application/json; charset=utf-8'):
+    def send(self, status, body, mime='application/json; charset=utf-8', extra_headers=()):
         if not isinstance(body, bytes): body = json.dumps(body,ensure_ascii=False,allow_nan=False).encode()
         self.send_response(status)
         self.send_header('Content-Type', mime)
@@ -94,11 +123,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('Cache-Control','no-store')
         self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'")
+        for name, value in extra_headers:
+            self.send_header(name, value)
         self.end_headers(); self.wfile.write(body)
 
     def do_GET(self):
         path = urlsplit(self.path).path
-        if path not in ('/api/health','/api/market/status') and not self.authorized(): return
+        if path == '/' and not self.authorized():
+            return self.send(200, (ROOT/'web/login.html').read_bytes(), 'text/html; charset=utf-8')
+        if path in ('/login.css', '/login.js'):
+            mime = 'text/css' if path.endswith('.css') else 'text/javascript'
+            return self.send(200, (ROOT/'web'/path[1:]).read_bytes(), mime+'; charset=utf-8')
+        if path not in ('/api/health','/api/market/status') and not self.authorized():
+            return self.send(401, {'error':'请先登录'})
         assets = {'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
         if path in assets:
             mime = {'/':'text/html','/app.js':'text/javascript','/style.css':'text/css'}[path]
@@ -128,9 +165,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404,{'error':'not found'})
 
     def do_POST(self):
-        if not self.authorized(): return
         path = urlsplit(self.path).path
-        if path not in ('/api/run','/api/agent/generate'): return self.send(404,{'error':'not found'})
+        if path not in ('/api/login','/api/run','/api/agent/generate'):
+            return self.send(404,{'error':'not found'})
+        if path != '/api/login' and not self.authorized():
+            return self.send(401, {'error':'请先登录'})
         origin = self.headers.get('Origin')
         host = self.headers.get('Host','')
         if origin and origin not in ('http://' + host, 'https://' + host):
@@ -139,7 +178,20 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(415,{'error':'use application/json'})
         try: size = int(self.headers.get('Content-Length','0'))
         except ValueError: return self.send(400,{'error':'invalid content length'})
-        if not 0 < size <= 10 * 1024 * 1024: return self.send(413,{'error':'request limit is 10 MB'})
+        limit = 1024 if path == '/api/login' else 10 * 1024 * 1024
+        if not 0 < size <= limit: return self.send(413,{'error':'request too large'})
+        if path == '/api/login':
+            try: payload = json.loads(self.rfile.read(size))
+            except (ValueError, UnicodeError): return self.send(400, {'error':'请求格式无效'})
+            supplied = payload.get('password') if isinstance(payload, dict) else None
+            password = os.environ.get('STRATEGYLAB_APP_PASSWORD')
+            if not isinstance(supplied, str) or not password or not hmac.compare_digest(supplied, password):
+                return self.send(401, {'error':'密码错误'})
+            session = issue_session(password)
+            secure = '; Secure' if self.headers.get('X-Forwarded-Proto') == 'https' else ''
+            cookie = ('strategylab_session=' + session + '; Path=/; HttpOnly; SameSite=Strict; Max-Age='
+                      + str(SESSION_TTL_SECONDS) + secure)
+            return self.send(200, {'ok':True}, extra_headers=(('Set-Cookie', cookie),))
         if not SLOTS.acquire(False): return self.send(429,{'error':'two experiments are already running'})
         try:
             payload = json.loads(self.rfile.read(size))

@@ -1,0 +1,17 @@
+:root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;color:#17332e;background:#f3f7f5}
+*{box-sizing:border-box}
+body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 12% 15%,#ddefe7 0,transparent 34%),radial-gradient(circle at 88% 82%,#e3ede8 0,transparent 30%),#f3f7f5}
+.login-card{width:min(100%,420px);padding:38px 36px 30px;background:#fff;border:1px solid #e1eae5;border-radius:18px;box-shadow:0 22px 64px #194d3914}
+.mark{width:42px;height:42px;display:grid;place-items:center;border-radius:12px;background:#0a8b78;color:#fff;font-weight:800;letter-spacing:-.06em}
+.eyebrow{margin:28px 0 6px;color:#0a8b78;font-size:11px;letter-spacing:.22em;font-weight:750}
+h1{font-size:30px;letter-spacing:-.03em;margin:0 0 10px}
+.description{font-size:14px;line-height:1.65;color:#647871;margin:0 0 28px}
+label{display:block;font-size:13px;font-weight:650;margin-bottom:9px}
+input{width:100%;height:45px;padding:0 13px;border:1px solid #cddbd4;border-radius:9px;font-size:16px;outline:none}
+input:focus{border-color:#0a8b78;box-shadow:0 0 0 3px #0a8b781e}
+button{margin-top:18px;width:100%;height:45px;border:0;border-radius:9px;background:#0a8b78;color:white;font-size:14px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:12px}
+button:hover{background:#087a69}button:disabled{opacity:.65;cursor:wait}
+#message{min-height:20px;margin:12px 0 0;color:#a33b35;font-size:13px}
+.hint{border-top:1px solid #ecf1ed;padding-top:19px;margin:14px 0 0;color:#899b92;font-size:12px}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media(max-width:500px){.login-card{padding:30px 24px}}

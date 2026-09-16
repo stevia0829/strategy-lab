@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>登录 · Strategy Lab</title>
+  <link rel="stylesheet" href="/login.css">
+  <script src="/login.js" defer></script>
+</head>
+<body>
+  <main class="login-card">
+    <div class="mark">SL</div>
+    <p class="eyebrow">STRATEGY LAB</p>
+    <h1>欢迎回来</h1>
+    <p class="description">输入本机部署的管理员密码，继续编写策略和查看回测记录。</p>
+    <form id="login-form">
+      <label for="password">管理员密码</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+      <button type="submit">进入工作台 <span>→</span></button>
+      <p id="message" role="status" aria-live="polite"></p>
+    </form>
+    <p class="hint">密码保存在项目的本机 <code>.env.deploy</code> 中。</p>
+  </main>
+</body>
+</html>
