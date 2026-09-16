@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Local-only workbench. Runs fixed engines, never evaluates user source code."""
+import argparse
+import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import threading
+from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT / 'python'))
+from strategylab.engine import validate
+from strategylab.market import load_market, connect_db
+SLOTS = threading.BoundedSemaphore(2)
+
+
+GO_BUILD_LOCK = threading.Lock()
+
+
+def ensure_go():
+    binary = ROOT / 'bin/strategy-lab'
+    sources = list((ROOT/'engine').glob('*.go')) + list((ROOT/'cmd').rglob('*.go')) + [ROOT/'go.mod']
+    with GO_BUILD_LOCK:
+        newest = max(p.stat().st_mtime for p in sources)
+        if not binary.exists() or binary.stat().st_mtime < newest:
+            binary.parent.mkdir(exist_ok=True)
+            try:
+                proc = subprocess.run(['go', 'build', '-o', str(binary), './cmd/strategy-lab'],
+                                      cwd=ROOT, capture_output=True, text=True, timeout=45)
+            except FileNotFoundError:
+                raise ValueError('Go 尚未安装；请选择 Python，或安装 Go 1.23+ 后重试')
+            if proc.returncode:
+                raise ValueError('Go 编译失败：' + proc.stderr.strip()[:1500])
+    return binary
+
+
+def run_engine(engine, strategy, csv_text):
+    if engine not in ('python', 'go'):
+        raise ValueError('请选择 Python 或 Go')
+    binary = ensure_go() if engine == 'go' else None
+    with tempfile.TemporaryDirectory(prefix='strategylab-') as folder:
+        folder = Path(folder)
+        (folder/'strategy.json').write_text(json.dumps(strategy,ensure_ascii=False,allow_nan=False))
+        (folder/'bars.csv').write_text(csv_text)
+        args = ['--strategy', str(folder/'strategy.json'), '--data', str(folder/'bars.csv'), '--out', str(folder/'result.json')]
+        command = ([str(binary)] if engine == 'go' else [sys.executable, '-B', '-m', 'strategylab']) + args
+        environment = dict(os.environ, PYTHONPATH=str(ROOT/'python'))
+        proc = subprocess.run(command, cwd=ROOT, env=environment, capture_output=True, text=True, timeout=45)
+        if proc.returncode: raise ValueError(engine + ': ' + proc.stderr.strip()[:1500])
+        return json.loads((folder/'result.json').read_text())
+
+
+class Handler(BaseHTTPRequestHandler):
+    def send(self, status, body, mime='application/json; charset=utf-8'):
+        if not isinstance(body, bytes): body = json.dumps(body,ensure_ascii=False,allow_nan=False).encode()
+        self.send_response(status)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('X-Content-Type-Options','nosniff')
+        self.send_header('Cache-Control','no-store')
+        self.send_header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'")
+        self.end_headers(); self.wfile.write(body)
+
+    def do_GET(self):
+        path = urlsplit(self.path).path
+        assets = {'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
+        if path in assets:
+            mime = {'/':'text/html','/app.js':'text/javascript','/style.css':'text/css'}[path]
+            return self.send(200,(ROOT/'web'/assets[path]).read_bytes(),mime+'; charset=utf-8')
+        if path == '/api/presets':
+            return self.send(200,{name:json.loads((ROOT/'examples'/(name+'.json')).read_text()) for name in ('trend','rsi','rotation','buy_hold')})
+        if path == '/api/demo': return self.send(200,(ROOT/'examples/demo.csv').read_bytes(),'text/csv; charset=utf-8')
+        if path == '/api/health': return self.send(200,{'status':'ok','go':(ROOT/'bin/strategy-lab').exists(),'python':True})
+        if path == '/api/market/status':
+            try:
+                with connect_db() as conn:
+                    conn.execute('SELECT 1')
+                return self.send(200,{'ready':True,'providers':['eastmoney','tencent'],'adjustment':'qfq'})
+            except ValueError as error:
+                return self.send(200,{'ready':False,'message':str(error)})
+        self.send(404,{'error':'not found'})
+
+    def do_POST(self):
+        if self.path != '/api/run': return self.send(404,{'error':'not found'})
+        origin = self.headers.get('Origin')
+        if origin and origin != 'http://' + self.headers.get('Host',''):
+            return self.send(403,{'error':'cross-origin request denied'})
+        if self.headers.get_content_type() != 'application/json':
+            return self.send(415,{'error':'use application/json'})
+        try: size = int(self.headers.get('Content-Length','0'))
+        except ValueError: return self.send(400,{'error':'invalid content length'})
+        if not 0 < size <= 10 * 1024 * 1024: return self.send(413,{'error':'request limit is 10 MB'})
+        if not SLOTS.acquire(False): return self.send(429,{'error':'two experiments are already running'})
+        try:
+            payload = json.loads(self.rfile.read(size))
+            if not isinstance(payload,dict): raise ValueError('request must be an object')
+            mode = payload.get('engine','python')
+            if mode not in ('go','python'): raise ValueError('unknown engine')
+            strategy = validate(payload['strategy'])
+            source = payload.get('source') or ('uploaded' if payload.get('csv') is not None else 'synthetic_demo')
+            if source not in ('synthetic_demo','uploaded','market'):
+                raise ValueError('unknown data source')
+            if source == 'market':
+                if payload.get('csv') is not None: raise ValueError('market request cannot include CSV')
+                csv_text, source_meta = load_market(strategy)
+            elif source == 'uploaded':
+                csv_text, source_meta = payload.get('csv'), None
+                if not isinstance(csv_text,str): raise ValueError('csv must be text')
+            else:
+                csv_text, source_meta = (ROOT/'examples/demo.csv').read_bytes().decode('utf-8'), None
+            output = run_engine(mode,strategy,csv_text)
+            canonical = json.dumps(strategy,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
+            self.send(200,{'strategy':strategy,'strategy_sha256':hashlib.sha256(canonical).hexdigest(),
+                           'source':source,'source_meta':source_meta,'result':output})
+        except subprocess.TimeoutExpired:
+            self.send(408,{'error':'engine exceeded 45 seconds; reduce rows/indicators'})
+        except (ValueError,KeyError,TypeError,OSError) as error:
+            self.send(400,{'error':str(error)})
+        finally: SLOTS.release()
+
+    def log_message(self, fmt, *args):
+        print('%s %s' % (self.log_date_time_string(), fmt % args), flush=True)
+
+
+def main():
+    parser=argparse.ArgumentParser(description='Local Strategy Lab workbench')
+    parser.add_argument('--port',type=int,default=8765)
+    args=parser.parse_args()
+    server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
+    print('Strategy Lab: http://127.0.0.1:%d — local data only' % args.port,flush=True)
+    try: server.serve_forever()
+    except KeyboardInterrupt: pass
+    finally: server.server_close()
+
+if __name__ == '__main__': main()

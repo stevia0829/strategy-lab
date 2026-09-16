@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "name": "21 日动量轮动",
+  "universe": [
+    "DEMO_EQ",
+    "DEMO_GOLD",
+    "DEMO_BOND"
+  ],
+  "benchmark": "DEMO_EQ",
+  "start": "2023-05-01",
+  "end": "2026-01-23",
+  "indicators": {
+    "rsi14": {
+      "kind": "rsi",
+      "period": 14
+    },
+    "macd_hist": {
+      "kind": "macd",
+      "fast": 12,
+      "slow": 26,
+      "signal": 9,
+      "output": "hist"
+    },
+    "sma60": {
+      "kind": "sma",
+      "period": 60
+    },
+    "roc21": {
+      "kind": "roc",
+      "period": 21
+    },
+    "momentum21": {
+      "kind": "momentum_score",
+      "period": 21
+    }
+  },
+  "entry": {
+    "left": "momentum21",
+    "op": "gt",
+    "right": 0
+  },
+  "exit": {
+    "left": "momentum21",
+    "op": "lt",
+    "right": 0
+  },
+  "selection": {
+    "max_positions": 1,
+    "rank_by": "momentum21",
+    "descending": true,
+    "mode": "rotate"
+  },
+  "execution": {
+    "initial_cash": 100000,
+    "commission_rate": 0.0003,
+    "min_commission": 5,
+    "slippage": 0.0005,
+    "lot_size": 100,
+    "max_exposure": 0.9
+  }
+}

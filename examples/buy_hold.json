@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "name": "买入并持有对照",
+  "universe": [
+    "DEMO_EQ"
+  ],
+  "benchmark": "DEMO_EQ",
+  "start": "2023-05-01",
+  "end": "2026-01-23",
+  "indicators": {},
+  "entry": true,
+  "exit": false,
+  "selection": {
+    "max_positions": 1,
+    "rank_by": "close",
+    "descending": true,
+    "mode": "hold"
+  },
+  "execution": {
+    "initial_cash": 100000,
+    "commission_rate": 0.0003,
+    "min_commission": 5,
+    "slippage": 0.0005,
+    "lot_size": 100,
+    "max_exposure": 1
+  }
+}

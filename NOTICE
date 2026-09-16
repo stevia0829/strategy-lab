@@ -1,0 +1,11 @@
+Strategy Lab
+
+Design inspiration: the user's local hackthon/strategylab-mvp project, which
+uses a visual strategy builder, a versioned Strategy IR and deterministic
+validation evidence. This is a separate implementation of a generic daily-bar
+backtester. No DreamDEX/Somnia SDK or simulated backtest output is copied.
+
+The weighted momentum formula matches the existing ETF project's stated
+numpy.polyfit weight convention for compatibility. A known-answer numeric
+fixture is retained for comparison. Formula compatibility does not imply
+strategy-performance equivalence.

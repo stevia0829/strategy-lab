@@ -1,0 +1,19 @@
+name: strategy-lab
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: strategy_lab
+      POSTGRES_USER: strategy_lab
+      POSTGRES_PASSWORD: strategy-lab-local
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - strategy_lab_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strategy_lab -d strategy_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+volumes:
+  strategy_lab_postgres:
