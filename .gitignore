@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.motor-code/
 build/
 dist/
 .DS_Store
