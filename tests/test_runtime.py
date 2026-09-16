@@ -41,6 +41,23 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, '请选择 Python'):
                 server.ensure_go()
 
+    def test_container_uses_prebuilt_go_without_compiler(self):
+        with patch.dict(server.os.environ, {'STRATEGYLAB_PREBUILT_GO': '1'}), \
+             patch.object(Path, 'is_file', return_value=True), \
+             patch.object(server.subprocess, 'run', side_effect=AssertionError('do not compile in container')):
+            self.assertEqual(server.ensure_go(), ROOT/'bin/strategy-lab')
+        with patch.dict(server.os.environ, {'STRATEGYLAB_PREBUILT_GO': '1'}), \
+             patch.object(Path, 'is_file', return_value=False):
+            with self.assertRaisesRegex(ValueError, '重新构建镜像'):
+                server.ensure_go()
+
+    def test_container_can_bind_all_interfaces_when_requested(self):
+        with patch.object(sys, 'argv', ['server.py', '--host', '0.0.0.0']), \
+             patch.object(server, 'ThreadingHTTPServer') as http:
+            http.return_value.serve_forever.side_effect = KeyboardInterrupt
+            server.main()
+            http.assert_called_once_with(('0.0.0.0', 8765), server.Handler)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -194,8 +194,17 @@ def connect_db(dsn=None):
     except ImportError:
         raise MarketDataError('缺少 PostgreSQL 驱动：请运行 pip install -e ".[market]"')
     try:
-        return psycopg.connect(dsn or os.environ.get('STRATEGYLAB_DATABASE_URL', DEFAULT_DSN),
-                               connect_timeout=5, autocommit=True)
+        configured_dsn = dsn or os.environ.get('STRATEGYLAB_DATABASE_URL')
+        if configured_dsn:
+            return psycopg.connect(configured_dsn, connect_timeout=5, autocommit=True)
+        if os.environ.get('STRATEGYLAB_DB_HOST'):
+            return psycopg.connect(host=os.environ['STRATEGYLAB_DB_HOST'],
+                                   port=os.environ.get('STRATEGYLAB_DB_PORT', '5432'),
+                                   dbname=os.environ.get('STRATEGYLAB_DB_NAME', 'strategy_lab'),
+                                   user=os.environ.get('STRATEGYLAB_DB_USER', 'strategy_lab'),
+                                   password=os.environ.get('STRATEGYLAB_DB_PASSWORD'),
+                                   connect_timeout=5, autocommit=True)
+        return psycopg.connect(DEFAULT_DSN, connect_timeout=5, autocommit=True)
     except psycopg.Error as error:
         raise MarketDataError('PostgreSQL 连接失败：请先运行 docker compose up -d，并检查 STRATEGYLAB_DATABASE_URL；' + str(error).splitlines()[0][:180])
 

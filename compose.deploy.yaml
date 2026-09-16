@@ -1,0 +1,47 @@
+name: strategy-lab-server
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: strategy_lab
+      POSTGRES_USER: strategy_lab
+      POSTGRES_PASSWORD: ${STRATEGYLAB_DB_PASSWORD:?Create .env.deploy with a strong password}
+    volumes:
+      - market_history:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U strategy_lab -d strategy_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  app:
+    build: .
+    image: strategy-lab:local
+    restart: unless-stopped
+    init: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      STRATEGYLAB_DB_HOST: postgres
+      STRATEGYLAB_DB_PORT: "5432"
+      STRATEGYLAB_DB_NAME: strategy_lab
+      STRATEGYLAB_DB_USER: strategy_lab
+      STRATEGYLAB_DB_PASSWORD: ${STRATEGYLAB_DB_PASSWORD:?Create .env.deploy with a strong password}
+    ports:
+      - "127.0.0.1:${STRATEGYLAB_PORT:-8765}:8765"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=256m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,sys,urllib.request; result=json.load(urllib.request.urlopen('http://127.0.0.1:8765/api/market/status',timeout=3)); sys.exit(0 if result.get('ready') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+volumes:
+  market_history:

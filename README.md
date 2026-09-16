@@ -17,6 +17,8 @@ make run
 
 打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)。默认资产是 510300、518880、511010；首次回测会从公开日线接口抓取并写入 PostgreSQL，下一次相同区间优先查库。数据库及复权规则见 [真实行情说明](docs/DATA_SOURCES.md)。Docker 只提供数据库，界面和两套回测引擎仍在本机运行。
 
+要在**一台服务器上**用 Docker 同时运行应用和 PostgreSQL，请按 [单机 Docker 部署](docs/DEPLOY_DOCKER.md) 操作；它使用独立的 `compose.deploy.yaml`，不会改动上述本机开发流程。
+
 已有 PostgreSQL 时，可设置 `STRATEGYLAB_DATABASE_URL` 并安装 `pip install -e '.[market]'`。Go 作为可选回测引擎需要 Go 1.23+，选择它时才会编译；网页无需 Node.js。只想检查规则时可在页面把数据来源切为“合成演示”，该模式不需要数据库。服务仅监听 127.0.0.1。
 
 ## 可以做什么
@@ -129,6 +131,7 @@ python/strategylab/      独立 Python 引擎与对照器
 web/                    无框架的可视化工作台
 server.py               本地 HTTP 服务与固定引擎进程调度
 compose.yaml             本机 PostgreSQL 17 服务
+Dockerfile / compose.deploy.yaml  单机服务器应用与数据库部署
 python/strategylab/market.py 公开行情、缓存与来源记录
 compare.py              开发者实现一致性检查
 examples/               JSON 模板、可重复生成的合成行情
@@ -141,10 +144,10 @@ docs/                  指标口径、设计与验收记录
 
 当前支持日线、只做多、无杠杆、下一交易日开盘成交。没有实盘交易、分钟级撮合、盘口冲击模型、卖空、参数优化或多人账户。持仓上限在入场执行，已有持仓价格上涨后可以超过上限，不会隐式每日减仓。
 
-本机服务不是面向公网的生产托管服务，没有用户认证；不要将端口直接暴露到公网。真实行情来自网页公开接口，并非有服务等级保证的交易所数据服务。固定引擎在独立子进程运行并有超时限制，但这不是运行任意用户 Python/Go 源码的安全沙箱。
+服务没有用户认证；单机 Docker 部署默认只允许服务器本机访问，远程使用时通过 SSH 隧道或带认证的 HTTPS 反向代理。真实行情来自网页公开接口，并非有服务等级保证的交易所数据服务。固定引擎在独立子进程运行并有超时限制，但这不是运行任意用户 Python/Go 源码的安全沙箱。
 
 ## 开源与参考
 
-采用 [MIT License](LICENSE)。项目可以作为独立仓库发布，已经包含贡献指南、测试工作流与协议说明；当前没有替用户创建或发布 GitHub 远程仓库。
+采用 [MIT License](LICENSE)。代码发布于 [GitHub 项目](https://github.com/stevia0829/strategy-lab)，包含贡献指南、测试工作流与协议说明。
 
 产品思路参考本地 hackthon 的 `strategylab-mvp`：可视化条件 → 版本化 Strategy IR → 确定性验证。这里重新实现了真实资金/持仓回放，不复制其演示收益，不引入 DreamDEX/Somnia SDK 或钱包逻辑。参见 [NOTICE](NOTICE)。

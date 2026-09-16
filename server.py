@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local-only workbench. Runs fixed engines, never evaluates user source code."""
+"""Strategy workbench. Runs fixed engines, never evaluates user source code."""
 import argparse
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -24,6 +24,10 @@ GO_BUILD_LOCK = threading.Lock()
 
 def ensure_go():
     binary = ROOT / 'bin/strategy-lab'
+    if os.environ.get('STRATEGYLAB_PREBUILT_GO') == '1':
+        if not binary.is_file():
+            raise ValueError('容器缺少预编译 Go 引擎；请重新构建镜像')
+        return binary
     sources = list((ROOT/'engine').glob('*.go')) + list((ROOT/'cmd').rglob('*.go')) + [ROOT/'go.mod']
     with GO_BUILD_LOCK:
         newest = max(p.stat().st_mtime for p in sources)
@@ -130,9 +134,10 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     parser=argparse.ArgumentParser(description='Local Strategy Lab workbench')
     parser.add_argument('--port',type=int,default=8765)
+    parser.add_argument('--host',choices=('127.0.0.1','0.0.0.0'),default='127.0.0.1')
     args=parser.parse_args()
-    server=ThreadingHTTPServer(('127.0.0.1',args.port),Handler)
-    print('Strategy Lab: http://127.0.0.1:%d — local data only' % args.port,flush=True)
+    server=ThreadingHTTPServer((args.host,args.port),Handler)
+    print('Strategy Lab: listening on %s:%d' % (args.host,args.port),flush=True)
     try: server.serve_forever()
     except KeyboardInterrupt: pass
     finally: server.server_close()
