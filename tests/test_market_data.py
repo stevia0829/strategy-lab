@@ -20,6 +20,7 @@ from strategylab.market import (MarketDataError, fetch_eastmoney, fetch_tencent,
 class ParserTests(unittest.TestCase):
     def test_market_codes_and_adjusted_daily_request(self):
         self.assertEqual(symbol_market('510300'), '1')
+        self.assertEqual(symbol_market('000300'), '1')
         self.assertEqual(symbol_market('159915'), '0')
         with self.assertRaises(MarketDataError):
             symbol_market('DEMO_EQ')
@@ -66,6 +67,19 @@ class ParserTests(unittest.TestCase):
         self.assertEqual(len(bars), 1)
         self.assertEqual(bars[0][5], Decimal('3.1'))
         self.assertIn('sh510300,day,2024-01-01,2025-12-31,640,qfq',
+                      parse_qs(urlsplit(requests[0]).query)['param'])
+
+    def test_index_uses_unadjusted_daily_response(self):
+        requests = []
+        def open_fixture(request, timeout):
+            requests.append(request.full_url)
+            payload = {'code': 0, 'data': {'sh000300': {'day': [
+                ['2024-01-02', '3400', '3410', '3420', '3390', '12345']
+            ]}}}
+            return io.BytesIO(('kline_day2024=' + json.dumps(payload)).encode())
+        bars = fetch_tencent('000300', date(2024, 1, 1), date(2024, 1, 3), opener=open_fixture)
+        self.assertEqual(bars[0][5], Decimal('3410'))
+        self.assertIn('sh000300,day,2024-01-01,2025-12-31,640,',
                       parse_qs(urlsplit(requests[0]).query)['param'])
 
 

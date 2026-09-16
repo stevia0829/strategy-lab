@@ -1,7 +1,7 @@
 # Architecture
 
 ```text
-Visual controls / JSON / local Go or Python program
+Visual controls / JSON / user-authored Python or Go targets
                          |
                    Strategy IR v1
                          |
@@ -18,15 +18,16 @@ Visual controls / JSON / local Go or Python program
 ```
 
 - `engine/` uses the Go standard library; `python/strategylab/engine.py` uses the Python standard library. Either CLI can run independently without the other runtime.
-- `server.py` provides a local static interface and dispatches fixed engine subprocesses. The web workbench defaults to Python and starts without Go. The Go option builds lazily on first use. Only developer differential tests require both runtimes.
-- Input is declarative JSON, not arbitrary Python/Go code. Unknown indicators/operands are rejected; there is no eval or shell interpolation.
-- The server accepts at most 10 MB, limits concurrent experiments to two, and applies a 45-second timeout per subprocess. It binds only to 127.0.0.1, has no CORS allowance and rejects cross-origin POSTs.
-- A downloaded experiment is a reproducible record: strategy snapshot, configuration/data hashes, the selected engine output. No network data fetching or upload to third parties occurs.
+- `server.py` provides the static interface, market cache, model generation and authenticated API. The web workbench defaults to Python. Simple strategies use the versioned declarative IR; custom targets use the same execution and accounting code through a per-day callback.
+- The full Docker deployment runs an application, PostgreSQL and a separate offline worker. The worker has no network or database/model credentials, a read-only root filesystem and bounded memory/process counts. The app and worker exchange job files through a private named volume. Only the worker executes user-authored Python or compiles and runs Go code; the app never evaluates uploaded source.
+- Declarative rule evaluation still has no `eval`, arbitrary source execution or network calls. Unknown indicators/operands are rejected.
+- The server accepts at most 10 MB, limits concurrent experiments to two and rejects cross-origin POSTs. It binds to 127.0.0.1 by default; the Docker deployment binds the container interface but publishes only on the host loopback and requires an administrator password.
+- A downloaded experiment includes the strategy snapshot, code when used, configuration/data/code hashes, the selected engine output and source metadata. Completed experiments persist in PostgreSQL. The optional Agent generator calls only one user-selected provider with the user-provided API Key and strategy prompt, never trades or executes generated code automatically.
 - The hackathon StrategyLab reference contributed product ideas: versioned IR, editable conditions, deterministic evidence. This new project does not import its wallet/Somnia/DreamDEX behavior or simulated financial output.
 
 ## Deliberate first-release limits
 
-No arbitrary user-code execution, remote data providers, live execution, parameter optimizer, order-book model, leverage, shorts or authentication. No claim that a cross-language match validates investment performance. No automatic translation of `jqdata` strategies. CSV adapters can be added without touching the execution contract; new indicators must be implemented in both engines with independent known-answer tests.
+No live execution, parameter optimizer, order-book model, leverage, shorts or multi-user accounts. No claim that a cross-language match validates investment performance. No automatic translation of `jqdata` strategies. CSV adapters can be added without touching the execution contract; new declarative indicators must be implemented in both engines with independent known-answer tests. The offline worker is meant for a single trusted administrator, not public multi-tenant code hosting.
 
 ## Extending safely
 

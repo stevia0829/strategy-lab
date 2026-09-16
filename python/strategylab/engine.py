@@ -284,7 +284,7 @@ def metrics(equity, closed, fills, initial, costs, turnover):
             'sessions': n, 'final_equity': values[-1]}
 
 
-def run(strategy, csv_text):
+def run(strategy, csv_text, decide=None):
     s = validate(strategy); data = read_csv(csv_text)
     universe = sorted(s['universe']); needed = sorted(set(universe + [s['benchmark']]))
     if any(c not in data for c in needed): raise ValueError('CSV is missing requested symbols/benchmark')
@@ -301,7 +301,19 @@ def run(strategy, csv_text):
     initial = float(e['initial_cash']); cash = initial; positions = {}; marks = {}
     fills, closed, rejected, curve, signals = [], [], [], [], []
     costs = turnover = 0.0
-    def targets(day):
+    def targets(day, equity_hint=None):
+        if decide is not None:
+            history = {c: [dict(data[c][d]) for d in sorted(data[c]) if d <= day]
+                       for c in needed}
+            context = {'date': day, 'history': history,
+                       'positions': {c: p['quantity'] for c, p in sorted(positions.items())},
+                       'cash': cash, 'equity': initial if equity_hint is None else equity_hint}
+            chosen = decide(context)
+            if (not isinstance(chosen, list) or len(chosen) > sel['max_positions']
+                    or any(not isinstance(c, str) or c not in universe for c in chosen)
+                    or len(set(chosen)) != len(chosen)):
+                raise ValueError('decide(' + day + ') must return unique universe symbols, at most max_positions')
+            return sorted(chosen)
         keep, candidates = [], []
         for c in universe:
             if day not in indices[c]:
@@ -376,7 +388,7 @@ def run(strategy, csv_text):
         curve.append({'date': day, 'equity': equity, 'cash': cash, 'exposure': value / equity if equity > 0 else 0,
                       'benchmark': initial * benchmark_mark / benchmark_base, 'stale_symbols': stale,
                       'positions': {c: p['quantity'] for c, p in sorted(positions.items())}})
-        pending = targets(day); signals.append({'date': day, 'targets': pending})
+        pending = targets(day, equity); signals.append({'date': day, 'targets': pending})
         previous = day
     return {'engine': 'python', 'engine_version': VERSION, 'strategy_name': s['name'],
             'data_sha256': hashlib.sha256(csv_text.encode()).hexdigest(),

@@ -5,15 +5,16 @@ const esc = v => String(v).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const names = {open:'开盘价',high:'最高价',low:'最低价',close:'收盘价',volume:'成交量'};
 const kinds = {sma:'SMA 均线',ema:'EMA 指数均线',rsi:'RSI 相对强弱',macd:'MACD',roc:'ROC 涨跌幅 %',momentum_score:'加权动量评分',atr:'ATR 真实波幅',highest:'窗口最高值',lowest:'窗口最低值'};
 const operators = {gt:'大于 >',gte:'大于等于 ≥',lt:'小于 <',lte:'小于等于 ≤',eq:'等于 =',cross_above:'向上穿越 ↑',cross_below:'向下穿越 ↓'};
-const state = {config:null,presets:{},csv:null,dataMode:'market',modeDrafts:{},jsonMode:false,complex:false,report:null,result:null,busy:false};
+const state = {config:null,presets:{},csv:null,dataMode:'market',modeDrafts:{},jsonMode:false,complex:false,report:null,result:null,busy:false,page:'code',strategyMode:'code',codeExamples:{},codeDrafts:{python:'',go:''},currentCodeEngine:'python'};
+const agentModels={deepseek:'deepseek-flash',gpt:'gpt-5.1',minimax:'MiniMax-M2.7',glm:'glm-5.2',kimi:'kimi-k2.6'};
 const opts = (values, selected, labels={}) => values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(labels[v]||v)}</option>`).join('');
 const refs = () => [...Object.keys(names),...Object.keys(state.config.indicators)];
 const setStatus = (text,type='') => { $('status').textContent=text; $('status').className=type; };
 const dateInChina = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 function marketDates(){const d=new Date(dateInChina()+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-1);const end=d.toISOString().slice(0,10);d.setUTCFullYear(d.getUTCFullYear()-2);return [d.toISOString().slice(0,10),end];}
-function marketDefaults(c){const next=clone(c),[start,end]=marketDates();next.universe=['510300','518880','511010'];next.benchmark='510300';next.start=start;next.end=end;next.selection.max_positions=Math.min(next.selection.max_positions,3);return next;}
+function marketDefaults(c){const next=clone(c),[start,end]=marketDates();next.universe=['510300','518880','511010'];next.benchmark='000300';next.start=start;next.end=end;next.selection.max_positions=Math.min(next.selection.max_positions,3);return next;}
 function updateSourceLabel(){const mode=state.dataMode,c=state.config;const badge=$('source-badge');$('data-source').value=mode;
- if(mode==='market'){badge.innerHTML='真实行情 · 公开接口<span>前复权 · PostgreSQL 缓存</span>';$('data-name').textContent=c.universe.join(' · ');}
+ if(mode==='market'){badge.innerHTML='真实行情 · 公开接口<span>PostgreSQL 缓存</span>';$('data-name').textContent=c.universe.join(' · ');}
  else if(mode==='uploaded'){badge.textContent='本地导入行情 · 请确认数据口径';}
  else{badge.innerHTML='合成演示数据<span>不代表真实市场表现</span>';$('data-name').textContent='800 个模拟交易日 · 3 个资产';}
  badge.classList.toggle('uploaded',mode!=='synthetic_demo');$('reset-data').classList.toggle('hidden',mode==='synthetic_demo');}
@@ -87,6 +88,29 @@ function tab(json){
  }catch(e){state.config=previous;state.jsonMode=previousMode;setStatus('配置未应用：'+e.message,'error');}
 }
 function dirty(){if(state.report&&!state.busy)setStatus('参数已修改。当前结果仍属于上一次运行，请重新回测。');}
+function page(name){
+ if(!['code','simple','run','history'].includes(name))return;
+ if(name==='code'||name==='simple')state.strategyMode=name;
+ state.page=name;document.body.className='page-'+name;
+ document.querySelectorAll('.main-nav [data-page]').forEach(el=>el.classList.toggle('nav-active',el.dataset.page===name));
+ $('history-page').classList.toggle('hidden',name!=='history');
+ $('builder-title').textContent=name==='simple'?'简单策略':'策略输入';$('builder-tag').textContent=name==='simple'?'无需编程':'Python / Go';
+ if(name==='history')loadHistory();
+}
+function codeFor(engine){return state.codeDrafts[engine]||state.codeExamples[engine]||'';}
+function switchCodeEngine(engine){
+ state.codeDrafts[state.currentCodeEngine]=$('user-code').value;
+ state.currentCodeEngine=engine;$('code-engine').value=engine;$('engine').value=engine;$('user-code').value=codeFor(engine);
+}
+async function loadHistory(){
+ const list=$('history-list');list.textContent='正在读取历史记录…';
+ try{const response=await fetch('/api/runs');const body=await response.json();if(!response.ok)throw new Error(body.error||'读取失败');
+  list.replaceChildren();if(!body.runs.length){list.textContent='还没有完成的回测记录。';return;}
+  for(const item of body.runs){const button=document.createElement('button');button.className='history-item';
+   button.innerHTML=`<span><strong>${esc(item.strategy_name)}</strong><small>${esc(new Date(item.created_at).toLocaleString('zh-CN'))} · ${item.strategy_mode==='code'?'自写代码':'简单策略'} · ${esc(item.engine)} · ${esc(item.source)}</small></span><span class="${item.total_return<0?'negative':'positive'}">${pct(item.total_return)}<small> / 回撤 ${pct(item.max_drawdown)}</small></span>`;
+   button.onclick=async()=>{try{const res=await fetch('/api/runs/'+encodeURIComponent(item.id));const bundle=await res.json();if(!res.ok)throw new Error(bundle.error||'读取失败');state.config=bundle.strategy;render();if(bundle.user_code){state.codeDrafts[bundle.result.engine]=bundle.user_code;$('user-code').value=bundle.user_code;$('code-name').value=bundle.strategy.name;state.strategyMode='code';}else state.strategyMode='simple';$('engine').value=bundle.result.engine;$('code-engine').value=bundle.result.engine;showReport(bundle);page('run');setStatus('已载入历史回测记录。','success');}catch(e){list.textContent='无法打开记录：'+e.message;}};list.appendChild(button);}
+ }catch(e){list.textContent='无法读取历史记录：'+e.message;}
+}
 function download(name,text,type){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([text],{type}));a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
 function num(v,n=2){return v==null?'—':Number(v).toLocaleString('zh-CN',{maximumFractionDigits:n,minimumFractionDigits:n});}
 function pct(v){return v==null?'—':num(v*100)+'%';}
@@ -100,10 +124,15 @@ function showReport(bundle){
  const stale=r.equity.filter(p=>p.stale_symbols.length).length;
  const providerNames={eastmoney:'东方财富',tencent:'腾讯'};
  const providers=bundle.source==='market'?Object.entries(bundle.source_meta.symbol_providers).map(([symbol,source])=>`${symbol} ${providerNames[source]||source}`).join('、'):'';
- $('data-note').textContent=(bundle.source==='synthetic_demo'?'本结果使用合成演示行情，只用于检查规则和引擎。':bundle.source==='market'?`本结果使用前复权日线（${providers}）；${bundle.source_meta.fetched_symbols.length} 只资产从公开接口更新，${bundle.source_meta.cached_symbols.length} 只直接命中 PostgreSQL 缓存。行情不包含涨跌停价，分红及复权修订仍需核对。`:'本结果使用你导入的行情；请确认复权、上市时间和数据来源。')+(stale?` 有 ${stale} 天持仓缺失行情，暂沿用上次收盘估值，请检查完整报告。`:'');
+ $('data-note').textContent=(bundle.source==='synthetic_demo'?'本结果使用合成演示行情，只用于检查规则和引擎。':bundle.source==='market'?`本结果使用股票/ETF 前复权日线与指数原始日线（${providers}）；${bundle.source_meta.fetched_symbols.length} 只资产从公开接口更新，${bundle.source_meta.cached_symbols.length} 只直接命中 PostgreSQL 缓存。行情不包含涨跌停价，分红及复权修订仍需核对。`:'本结果使用你导入的行情；请确认复权、上市时间和数据来源。')+(stale?` 有 ${stale} 天持仓缺失行情，暂沿用上次收盘估值，请检查完整报告。`:'');
  $('range-label').textContent=`${r.equity[0].date} — ${r.equity.at(-1).date} · ${m.sessions} 个交易日`;$('result-name').textContent=r.strategy_name;
+ $('benchmark-label').textContent=bundle.strategy.benchmark==='000300'?'沪深300（000300）':'基准 '+bundle.strategy.benchmark;
+ $('chart-title').textContent=bundle.strategy.benchmark==='000300'?'策略与沪深300':'策略与基准 '+bundle.strategy.benchmark;
+ $('daily-benchmark-header').textContent=$('benchmark-label').textContent;
  $('fill-count').textContent=`· ${r.fills.length} 笔`;
  $('fills').innerHTML=r.fills.length?r.fills.slice(-100).reverse().map(f=>`<tr><td>${esc(f.date)}<small>信号 ${esc(f.signal_date)}</small></td><td>${esc(f.symbol)}</td><td class="${f.side==='buy'?'positive':'negative'}">${f.side==='buy'?'买入':'卖出'}</td><td>${num(f.quantity,0)}</td><td>${num(f.price,4)}</td><td>${num(f.fee)}</td></tr>`).join(''):'<tr><td colspan="6">没有成交。请检查规则、指标预热和可用资金；完整报告中可查看目标与拒单原因。</td></tr>';
+ $('daily-rows').innerHTML=r.equity.slice(-100).reverse().map(p=>`<tr><td>${esc(p.date)}</td><td>${num(p.equity/bundle.strategy.execution.initial_cash,4)}</td><td>${num(p.benchmark/bundle.strategy.execution.initial_cash,4)}</td><td>${pct(p.exposure)}</td><td>${esc(Object.entries(p.positions).map(([c,q])=>c+' × '+q).join('、')||'现金')}</td></tr>`).join('');
+ $('rejected-rows').innerHTML=r.rejected.length?r.rejected.slice(-100).reverse().map(p=>`<tr><td>${esc(p.date)}</td><td>${esc(p.symbol)}</td><td>${esc(p.side)}</td><td>${esc(p.reason)}</td></tr>`).join(''):'<tr><td colspan="4">没有未成交订单。</td></tr>';
  drawChart(r,bundle.strategy.execution.initial_cash);
 }
 function drawChart(r,initial){
@@ -118,13 +147,28 @@ function drawChart(r,initial){
 }
 async function run(){
  if(state.busy)return;
- try{const config=collect();state.busy=true;$('run').disabled=true;$('run').textContent='计算中…';setStatus(state.dataMode==='market'?'正在查库；缺失或过期的行情会从公开接口拉取并入库。':'正在使用本地数据回放订单并计算日净值。');
- const response=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine:$('engine').value,strategy:config,source:state.dataMode,csv:state.dataMode==='uploaded'?state.csv:null})});const bundle=await response.json();if(!response.ok)throw new Error(bundle.error||'回测失败');showReport(bundle);setStatus('回测完成。结果保留了策略配置、数据指纹、每日目标与全部成交。','success');
+ try{const config=collect();let code=null;if(state.strategyMode==='code'){config.name=$('code-name').value.trim();code=$('user-code').value;if(!config.name||!code.trim())throw new Error('请填写策略名称和代码');}
+ page('run');state.busy=true;$('run').disabled=true;$('run').textContent='计算中…';setStatus(state.dataMode==='market'?'正在查库并准备行情；首次请求会从公开接口抓取。':'正在准备本地行情。');
+ const response=await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({engine:$('engine').value,strategy:config,source:state.dataMode,csv:state.dataMode==='uploaded'?state.csv:null,user_code:code})});const bundle=await response.json();if(!response.ok)throw new Error(bundle.error||'回测失败');showReport(bundle);setStatus(bundle.history_error?'回测完成，但记录未保存：'+bundle.history_error:'回测完成，记录已保存到历史回测。','success');
  }catch(e){setStatus('无法完成回测：'+e.message,'error');}finally{state.busy=false;$('run').disabled=false;$('run').innerHTML='运行回测 <span>→</span>';}
 }
 function csvRows(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}else if(c===','&&!quoted){row.push(cell);cell='';}else if(c==='\n'&&!quoted){row.push(cell.replace(/\r$/,''));if(row.some(Boolean))rows.push(row);row=[];cell='';}else cell+=c;}if(quoted)throw new Error('CSV 引号未闭合');if(cell||row.length){row.push(cell.replace(/\r$/,''));rows.push(row);}return rows;}
 $('visual-tab').onclick=()=>tab(false);$('json-tab').onclick=()=>tab(true);$('apply-json').onclick=()=>tab(false);
 $('run').onclick=run;
+document.querySelectorAll('.main-nav [data-page]').forEach(el=>el.onclick=()=>page(el.dataset.page));
+$('code-next').onclick=()=>page('run');$('simple-next').onclick=()=>page('run');$('refresh-history').onclick=loadHistory;
+$('code-engine').onchange=e=>switchCodeEngine(e.target.value);
+$('engine').onchange=e=>{if(state.strategyMode==='code')switchCodeEngine(e.target.value);};
+$('user-code').addEventListener('input',()=>{state.codeDrafts[state.currentCodeEngine]=$('user-code').value;dirty();});
+$('load-code-example').onclick=()=>{const engine=$('code-engine').value;state.codeDrafts[engine]=state.codeExamples[engine];$('user-code').value=state.codeExamples[engine];dirty();};
+$('code-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw new Error('代码文件不能超过 100 KB');const engine=file.name.endsWith('.go')?'go':file.name.endsWith('.py')?'python':null;if(!engine)throw new Error('请选择 .py 或 .go 文件');if(engine!==state.currentCodeEngine)switchCodeEngine(engine);state.codeDrafts[engine]=await file.text();$('user-code').value=state.codeDrafts[engine];dirty();}catch(err){setStatus('导入代码失败：'+err.message,'error');}e.target.value='';};
+$('export-code').onclick=()=>download('strategy.'+($('code-engine').value==='go'?'go':'py'),$('user-code').value,'text/plain');
+$('agent-provider').onchange=()=>{$('agent-model').value=agentModels[$('agent-provider').value];};
+$('agent-generate').onclick=async()=>{const button=$('agent-generate');button.disabled=true;button.textContent='生成中…';
+ try{const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value};
+  const response=await fetch('/api/agent/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'生成失败');
+  $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;setStatus('代码草稿已生成。请检查交易逻辑后再运行回测。','success');
+ }catch(error){setStatus('生成失败：'+error.message,'error');}finally{button.disabled=false;button.textContent='生成代码草稿';}};
 $('preset').onchange=()=>{try{let old=state.config?collect():null;state.config=clone(state.presets[$('preset').value]);if(state.dataMode!=='synthetic_demo'&&old){state.config.universe=old.universe;state.config.benchmark=old.benchmark;state.config.start=old.start;state.config.end=old.end;state.config.selection.max_positions=Math.min(state.config.selection.max_positions,old.universe.length);}render();updateSourceLabel();dirty();}catch(e){setStatus(e.message,'error');}};
 document.querySelectorAll('[data-add]').forEach(el=>el.onclick=()=>{try{state.config=collect();const which=el.dataset.add;state.config[which][$(which+'-mode').value].push({left:'rsi14' in state.config.indicators?'rsi14':'close',op:'gt',right:0});renderRules(which);dirty();}catch(e){setStatus(e.message,'error');}});
 $('add-indicator').onclick=()=>{try{state.config=collect();let n=1;while(state.config.indicators['indicator'+n])n++;state.config.indicators['indicator'+n]={kind:'ema',period:20};render();dirty();}catch(e){setStatus(e.message,'error');}};
@@ -137,4 +181,4 @@ $('data-source').onchange=e=>{try{switchSource(e.target.value);if(e.target.value
 $('csv-file').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>8*1024*1024)throw new Error('CSV 文件请小于 8 MB');const text=await f.text();const rows=csvRows(text.replace(/^\uFEFF/,''));const header=rows.shift()||[];const col=header.indexOf('symbol'),dateCol=header.indexOf('date');if(col<0||dateCol<0||!rows.length)throw new Error('需要 date、symbol 和 OHLCV 列');const symbols=[...new Set(rows.map(r=>r[col]))].sort(),days=[...new Set(rows.map(r=>r[dateCol]))].sort();state.modeDrafts[state.dataMode]=collect();state.config=clone(state.modeDrafts[state.dataMode]);state.csv=text;state.dataMode='uploaded';$('uploaded-option').disabled=false;state.config.universe=symbols.slice(0,3);state.config.benchmark=symbols[0];state.config.start=days[0];state.config.end=days.at(-1);state.config.selection.max_positions=Math.min(state.config.selection.max_positions,state.config.universe.length);render();updateSourceLabel();$('data-name').textContent=`${f.name} · ${days.length} 天 · ${symbols.length} 个资产`;setStatus('行情已导入。默认选取前 3 个资产，可在资产代码中调整。');dirty();}catch(err){setStatus('导入失败：'+err.message,'error');}e.target.value='';};
 $('reset-data').onclick=()=>{try{switchSource('synthetic_demo');setStatus('已切换到合成演示数据；此数据不能用于判断策略收益。');}catch(e){setStatus(e.message,'error');}};
 document.querySelector('.workspace').addEventListener('input',dirty);
-(async()=>{try{$('run').disabled=true;const response=await fetch('/api/presets');state.presets=await response.json();state.config=marketDefaults(state.presets.trend);render();updateSourceLabel();$('run').disabled=false;try{const ready=await (await fetch('/api/market/status')).json();setStatus(ready.ready?'PostgreSQL 已就绪。真实行情回测会先查库，再按需更新。':ready.message,'ready' in ready&&!ready.ready?'error':'');}catch(e){setStatus('无法检查数据库状态：'+e.message,'error');}}catch(e){setStatus('初始化失败：'+e.message,'error');}})();
+(async()=>{try{$('run').disabled=true;const [presets,examples]=await Promise.all([fetch('/api/presets'),fetch('/api/code-examples')]);if(!presets.ok||!examples.ok)throw new Error('无法读取模板');state.presets=await presets.json();state.codeExamples=await examples.json();state.config=marketDefaults(state.presets.trend);render();updateSourceLabel();$('user-code').value=codeFor('python');$('agent-model').value=agentModels.deepseek;page('code');$('run').disabled=false;try{const ready=await (await fetch('/api/market/status')).json();setStatus(ready.ready?'PostgreSQL 已就绪。真实行情回测会先查库，再按需更新。':ready.message,'ready' in ready&&!ready.ready?'error':'');}catch(e){setStatus('无法检查数据库状态：'+e.message,'error');}}catch(e){setStatus('初始化失败：'+e.message,'error');}})();

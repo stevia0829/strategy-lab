@@ -54,6 +54,8 @@ class MarketDataError(ValueError):
 def symbol_market(symbol):
     if not isinstance(symbol, str) or not re.fullmatch(r'[0-9]{6}', symbol):
         raise MarketDataError('公开行情仅支持六位沪深股票或 ETF 代码，例如 510300、159915、600000')
+    if symbol == '000300':
+        return '1'  # 沪深300指数在东方财富/腾讯的上海指数代码
     return '1' if symbol[0] in '569' else '0'
 
 
@@ -98,7 +100,7 @@ def fetch_eastmoney(symbol, begin, end, *, opener=urlopen, sleeper=time.sleep):
               'fields1': 'f1,f2,f3,f4,f5,f6',
               'fields2': 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61',
               'ut': '7eea3edcaed734bea9cbfc24409ed989',
-              'klt': '101', 'fqt': '1', 'beg': begin.strftime('%Y%m%d'),
+              'klt': '101', 'fqt': '0' if symbol == '000300' else '1', 'beg': begin.strftime('%Y%m%d'),
               'end': end.strftime('%Y%m%d')}
     request = Request(API_URL + '?' + urlencode(params), headers={
         'User-Agent': 'Mozilla/5.0 StrategyLab/0.2',
@@ -124,8 +126,9 @@ def fetch_tencent(symbol, begin, end, *, opener=urlopen, sleeper=time.sleep):
     code = prefix + symbol
     by_day = {}
     for year in range(begin.year, end.year + 1):
-        params = {'_var': 'kline_dayqfq' + str(year),
-                  'param': f'{code},day,{year}-01-01,{year + 1}-12-31,640,qfq',
+        adjust = '' if symbol == '000300' else 'qfq'
+        params = {'_var': 'kline_day' + adjust + str(year),
+                  'param': f'{code},day,{year}-01-01,{year + 1}-12-31,640,{adjust}',
                   'r': '0.8205512681390605'}
         request = Request(TENCENT_URL + '?' + urlencode(params), headers={
             'User-Agent': 'Mozilla/5.0 StrategyLab/0.2',
@@ -144,9 +147,9 @@ def fetch_tencent(symbol, begin, end, *, opener=urlopen, sleeper=time.sleep):
                 if payload.get('code') != 0:
                     raise MarketDataError('腾讯行情接口响应异常')
                 block = payload.get('data', {}).get(code, {})
-                lines = block.get('qfqday')
+                lines = block.get('day' if symbol == '000300' else 'qfqday')
                 if not isinstance(lines, list):
-                    raise MarketDataError(symbol + ' 没有腾讯前复权日线')
+                    raise MarketDataError(symbol + ' 没有腾讯日线')
                 for cells in lines:
                     if not isinstance(cells, list) or len(cells) < 6:
                         raise MarketDataError(symbol + ' 的腾讯行情列不完整')
@@ -234,13 +237,14 @@ def load_market(strategy, *, provider=None, connection=None, now=None):
     try:
         ensure_schema(conn)
         for symbol in symbols:
+            adjustment = 'raw' if symbol == '000300' else ADJUSTMENT
             with conn.transaction():
                 conn.execute('SELECT pg_advisory_xact_lock(hashtext(%s))',
-                             (ADJUSTMENT + ':' + symbol,))
+                             (adjustment + ':' + symbol,))
                 coverage = {row[0]: row[1:] for row in conn.execute('''
                     SELECT source, requested_start, requested_end, fetched_at
                     FROM market_coverage WHERE adjustment=%s AND symbol=%s
-                    AND source = ANY(%s)''', (ADJUSTMENT, symbol, list(providers))).fetchall()}
+                    AND source = ANY(%s)''', (adjustment, symbol, list(providers))).fetchall()}
                 for source in providers:
                     row = coverage.get(source)
                     if row and row[0] <= begin and row[1] >= end and current - row[2] < timedelta(hours=24):
@@ -268,14 +272,14 @@ def load_market(strategy, *, provider=None, connection=None, now=None):
                             ON CONFLICT (source, adjustment, symbol, trade_date) DO UPDATE SET
                             open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low,
                             close=EXCLUDED.close, volume=EXCLUDED.volume, fetched_at=EXCLUDED.fetched_at''',
-                            [(source, ADJUSTMENT, *bar, current) for bar in bars])
+                            [(source, adjustment, *bar, current) for bar in bars])
                     conn.execute('''INSERT INTO market_coverage
                         (source, adjustment, symbol, requested_start, requested_end, fetched_at, row_count)
                         VALUES (%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (source, adjustment, symbol) DO UPDATE SET
                         requested_start=EXCLUDED.requested_start, requested_end=EXCLUDED.requested_end,
                         fetched_at=EXCLUDED.fetched_at, row_count=EXCLUDED.row_count''',
-                        (source, ADJUSTMENT, symbol, fetch_start, fetch_end, current, len(bars)))
+                        (source, adjustment, symbol, fetch_start, fetch_end, current, len(bars)))
                     fetched.append(symbol)
                     selected[symbol] = source
                     break
@@ -286,7 +290,7 @@ def load_market(strategy, *, provider=None, connection=None, now=None):
             rows.extend(conn.execute('''SELECT symbol, trade_date, open, high, low, close, volume
                 FROM market_bars WHERE source=%s AND adjustment=%s AND symbol=%s
                 AND trade_date BETWEEN %s AND %s''',
-                (source, ADJUSTMENT, symbol, begin, end)).fetchall())
+                (source, 'raw' if symbol == '000300' else ADJUSTMENT, symbol, begin, end)).fetchall())
         rows.sort(key=lambda row: (row[1], row[0]))
         by_symbol = {symbol: 0 for symbol in symbols}
         for row in rows:
@@ -301,8 +305,10 @@ def load_market(strategy, *, provider=None, connection=None, now=None):
         writer.writerow(['date', 'symbol', 'open', 'high', 'low', 'close', 'volume'])
         for symbol, day, opening, high, low, closing, volume in rows:
             writer.writerow([day.isoformat(), symbol, opening, high, low, closing, volume])
+        adjustments = {symbol: 'raw' if symbol == '000300' else ADJUSTMENT for symbol in symbols}
         return out.getvalue(), {'provider': list(set(selected.values()))[0] if len(set(selected.values())) == 1 else 'mixed',
-                'symbol_providers': selected, 'adjustment': ADJUSTMENT,
+                'symbol_providers': selected, 'symbol_adjustments': adjustments,
+                'adjustment': list(set(adjustments.values()))[0] if len(set(adjustments.values())) == 1 else 'mixed',
                 'requested_start': strategy['start'], 'requested_end': strategy['end'],
                 'warmup_start': begin.isoformat(), 'fetched_symbols': fetched,
                 'cached_symbols': cached, 'rows': len(rows), 'checked_at': current.isoformat()}

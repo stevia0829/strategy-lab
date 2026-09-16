@@ -62,8 +62,26 @@ type position struct {
 	Cost     float64
 }
 
+// Context contains only bars known through the signal date. Custom strategies
+// choose target symbols; the engine retains its normal next-open execution.
+type Context struct {
+	Date      string
+	History   map[string][]Bar
+	Positions map[string]int
+	Cash      float64
+	Equity    float64
+}
+
+type TargetDecider func(Context) ([]string, error)
+
 // Run executes yesterday's close signals at the next calendar session's open.
 func Run(s Strategy, text string) (Result, error) {
+	return RunWithTargets(s, text, nil)
+}
+
+// RunWithTargets lets a local Go strategy choose daily targets without changing
+// portfolio accounting. A nil decider preserves the declarative strategy.
+func RunWithTargets(s Strategy, text string, decide TargetDecider) (Result, error) {
 	r := Result{Engine: "go", EngineVersion: Version, StrategyName: s.Name, DataSHA: fmt.Sprintf("%x", sha256.Sum256([]byte(text))), Equity: []Point{}, Fills: []Fill{}, Closed: []Closed{}, Rejected: []Rejection{}, Signals: []Signal{}}
 	if err := s.Validate(); err != nil {
 		return r, err
@@ -128,7 +146,39 @@ func Run(s Strategy, text string) (Result, error) {
 	positions := map[string]position{}
 	marks := map[string]float64{}
 	costs, turnover := 0.0, 0.0
-	targets := func(day string) []string {
+	targets := func(day string, equityHint float64) ([]string, error) {
+		if decide != nil {
+			history := map[string][]Bar{}
+			for c := range needed {
+				history[c] = []Bar{}
+				for _, d := range sortedKeys(data[c]) {
+					if d > day {
+						break
+					}
+					history[c] = append(history[c], data[c][d])
+				}
+			}
+			posCopy := map[string]int{}
+			for c, p := range positions {
+				posCopy[c] = p.Quantity
+			}
+			chosen, err := decide(Context{day, history, posCopy, cash, equityHint})
+			if err != nil {
+				return nil, fmt.Errorf("decide(%s): %w", day, err)
+			}
+			if len(chosen) > sel.MaxPositions {
+				return nil, fmt.Errorf("decide(%s): targets exceed max_positions", day)
+			}
+			seen := map[string]bool{}
+			for _, c := range chosen {
+				if !needed[c] || !contains(universe, c) || seen[c] {
+					return nil, fmt.Errorf("decide(%s): duplicate or unknown target %q", day, c)
+				}
+				seen[c] = true
+			}
+			sort.Strings(chosen)
+			return chosen, nil
+		}
 		keep, candidates := []string{}, []string{}
 		for _, c := range universe {
 			i, ok := indices[c][day]
@@ -183,14 +233,17 @@ func Run(s Strategy, text string) (Result, error) {
 			keep = keep[:sel.MaxPositions]
 		}
 		sort.Strings(keep)
-		return keep
+		return keep, nil
 	}
 	previous := ""
 	startIndex := sort.SearchStrings(calendar, dates[0])
 	pending := []string{}
 	if startIndex > 0 {
 		previous = calendar[startIndex-1]
-		pending = targets(previous)
+		pending, err = targets(previous, e.InitialCash)
+		if err != nil {
+			return r, err
+		}
 	}
 	for _, c := range universe {
 		for _, d := range sortedKeys(data[c]) {
@@ -308,7 +361,10 @@ func Run(s Strategy, text string) (Result, error) {
 			exposure = value / equity
 		}
 		r.Equity = append(r.Equity, Point{day, equity, cash, exposure, e.InitialCash * benchmarkMark / base, stale, posCopy})
-		pending = targets(day)
+		pending, err = targets(day, equity)
+		if err != nil {
+			return r, err
+		}
 		r.Signals = append(r.Signals, Signal{day, pending})
 		previous = day
 	}

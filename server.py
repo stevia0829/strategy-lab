@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Strategy workbench. Runs fixed engines, never evaluates user source code."""
 import argparse
+import base64
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hmac
 import json
 import os
 from pathlib import Path
@@ -16,6 +18,9 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'python'))
 from strategylab.engine import validate
 from strategylab.market import load_market, connect_db
+from agent_codegen import generate
+from history import get_run, list_runs, save_run
+from job_queue import run_code
 SLOTS = threading.BoundedSemaphore(2)
 
 
@@ -60,6 +65,27 @@ def run_engine(engine, strategy, csv_text):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def authorized(self):
+        password = os.environ.get('STRATEGYLAB_APP_PASSWORD')
+        if not password:
+            return True
+        token = self.headers.get('Authorization', '')
+        try:
+            scheme, encoded = token.split(' ', 1)
+            userpass = base64.b64decode(encoded, validate=True).decode() if scheme == 'Basic' else ''
+        except (ValueError, UnicodeError):
+            userpass = ''
+        if hmac.compare_digest(userpass, 'admin:' + password):
+            return True
+        body = b'Authentication required'
+        self.send_response(401)
+        self.send_header('WWW-Authenticate', 'Basic realm="Strategy Lab"')
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def send(self, status, body, mime='application/json; charset=utf-8'):
         if not isinstance(body, bytes): body = json.dumps(body,ensure_ascii=False,allow_nan=False).encode()
         self.send_response(status)
@@ -72,6 +98,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path not in ('/api/health','/api/market/status') and not self.authorized(): return
         assets = {'/':'index.html','/app.js':'app.js','/style.css':'style.css'}
         if path in assets:
             mime = {'/':'text/html','/app.js':'text/javascript','/style.css':'text/css'}[path]
@@ -79,6 +106,17 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/presets':
             return self.send(200,{name:json.loads((ROOT/'examples'/(name+'.json')).read_text()) for name in ('trend','rsi','rotation','buy_hold')})
         if path == '/api/demo': return self.send(200,(ROOT/'examples/demo.csv').read_bytes(),'text/csv; charset=utf-8')
+        if path == '/api/code-examples':
+            return self.send(200,{name:(ROOT/'examples'/('custom_rsi.'+extension)).read_text()
+                                  for name, extension in (('python','py'),('go','go'))})
+        if path == '/api/runs':
+            try: return self.send(200,{'runs':list_runs()})
+            except ValueError as error: return self.send(503,{'error':str(error)})
+        if path.startswith('/api/runs/'):
+            try:
+                item = get_run(path.removeprefix('/api/runs/'))
+                return self.send(200,item) if item else self.send(404,{'error':'回测记录不存在'})
+            except ValueError as error: return self.send(400,{'error':str(error)})
         if path == '/api/health': return self.send(200,{'status':'ok','go':(ROOT/'bin/strategy-lab').exists(),'python':True})
         if path == '/api/market/status':
             try:
@@ -90,9 +128,12 @@ class Handler(BaseHTTPRequestHandler):
         self.send(404,{'error':'not found'})
 
     def do_POST(self):
-        if self.path != '/api/run': return self.send(404,{'error':'not found'})
+        if not self.authorized(): return
+        path = urlsplit(self.path).path
+        if path not in ('/api/run','/api/agent/generate'): return self.send(404,{'error':'not found'})
         origin = self.headers.get('Origin')
-        if origin and origin != 'http://' + self.headers.get('Host',''):
+        host = self.headers.get('Host','')
+        if origin and origin not in ('http://' + host, 'https://' + host):
             return self.send(403,{'error':'cross-origin request denied'})
         if self.headers.get_content_type() != 'application/json':
             return self.send(415,{'error':'use application/json'})
@@ -103,6 +144,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(self.rfile.read(size))
             if not isinstance(payload,dict): raise ValueError('request must be an object')
+            if path == '/api/agent/generate':
+                return self.send(200,generate(payload))
             mode = payload.get('engine','python')
             if mode not in ('go','python'): raise ValueError('unknown engine')
             strategy = validate(payload['strategy'])
@@ -117,10 +160,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(csv_text,str): raise ValueError('csv must be text')
             else:
                 csv_text, source_meta = (ROOT/'examples/demo.csv').read_bytes().decode('utf-8'), None
-            output = run_engine(mode,strategy,csv_text)
+            code = payload.get('user_code')
+            output = run_code(mode,strategy,csv_text,code) if code is not None else run_engine(mode,strategy,csv_text)
             canonical = json.dumps(strategy,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-            self.send(200,{'strategy':strategy,'strategy_sha256':hashlib.sha256(canonical).hexdigest(),
-                           'source':source,'source_meta':source_meta,'result':output})
+            bundle = {'strategy':strategy,'strategy_sha256':hashlib.sha256(canonical).hexdigest(),
+                      'strategy_mode':'code' if code is not None else 'simple',
+                      'user_code':code,'code_sha256':hashlib.sha256(code.encode()).hexdigest() if code is not None else None,
+                      'source':source,'source_meta':source_meta,'result':output}
+            try: bundle['run_id'] = save_run(bundle)
+            except (ValueError, OSError) as error: bundle['history_error'] = str(error)
+            self.send(200,bundle)
         except subprocess.TimeoutExpired:
             self.send(408,{'error':'engine exceeded 45 seconds; reduce rows/indicators'})
         except (ValueError,KeyError,TypeError,OSError) as error:

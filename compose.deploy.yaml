@@ -28,8 +28,12 @@ services:
       STRATEGYLAB_DB_NAME: strategy_lab
       STRATEGYLAB_DB_USER: strategy_lab
       STRATEGYLAB_DB_PASSWORD: ${STRATEGYLAB_DB_PASSWORD:?Create .env.deploy with a strong password}
+      STRATEGYLAB_APP_PASSWORD: ${STRATEGYLAB_APP_PASSWORD:?Create .env.deploy with an app password}
+      STRATEGYLAB_JOBS_DIR: /jobs
     ports:
       - "127.0.0.1:${STRATEGYLAB_PORT:-8765}:8765"
+    volumes:
+      - jobs:/jobs
     read_only: true
     tmpfs:
       - /tmp:rw,nosuid,nodev,size=256m
@@ -43,5 +47,24 @@ services:
       timeout: 5s
       retries: 6
       start_period: 20s
+  worker:
+    image: strategy-lab:local
+    restart: unless-stopped
+    command: ["python", "-B", "worker.py"]
+    network_mode: none
+    environment:
+      STRATEGYLAB_JOBS_DIR: /jobs
+    volumes:
+      - jobs:/jobs
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 2g
 volumes:
   market_history:
+  jobs:
