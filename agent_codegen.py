@@ -9,10 +9,12 @@ from urllib.request import Request, urlopen
 
 PROVIDERS = {
     'deepseek': ('https://api.deepseek.com/chat/completions', 'deepseek-flash'),
-    'gpt': ('https://api.openai.com/v1/chat/completions', 'gpt-5.1'),
-    'minimax': ('https://api.minimax.io/v1/chat/completions', 'MiniMax-M2.7'),
+    'gpt': ('https://api.openai.com/v1/chat/completions', 'gpt-5.6-sol'),
+    'minimax': ('https://api.minimax.io/v1/chat/completions', 'MiniMax-M3'),
     'glm': ('https://open.bigmodel.cn/api/paas/v4/chat/completions', 'glm-5.2'),
+    'glm_global': ('https://api.z.ai/api/paas/v4/chat/completions', 'glm-5.3'),
     'kimi': ('https://api.moonshot.cn/v1/chat/completions', 'kimi-k2.6'),
+    'kimi_global': ('https://api.moonshot.ai/v1/chat/completions', 'kimi-k3'),
 }
 SKILL_NAME = 'strategy-lab-script'
 SKILL_PATH = Path(__file__).resolve().parent / '.agents' / 'skills' / SKILL_NAME / 'SKILL.md'

@@ -7,7 +7,26 @@ const kinds = {sma:'SMA 均线',ema:'EMA 指数均线',rsi:'RSI 相对强弱',ma
 const operators = {gt:'大于 >',gte:'大于等于 ≥',lt:'小于 <',lte:'小于等于 ≤',eq:'等于 =',cross_above:'向上穿越 ↑',cross_below:'向下穿越 ↓'};
 const state = {config:null,presets:{},csv:null,dataMode:'market',modeDrafts:{},jsonMode:false,complex:false,report:null,result:null,busy:false,page:'code',strategyMode:'code',codeExamples:{},codeDrafts:{python:'',go:''},currentCodeEngine:'python'};
 const pageMeta={code:['RESEARCH WORKSPACE / 01','把交易想法，变成可检验的规则。','用 Agent 生成草稿，或自己编写 Python / Go 策略。'],simple:['RESEARCH WORKSPACE / 02','用指标组合，定义交易规则。','从模板开始，组合 RSI、MACD、均线等条件。'],run:['RESEARCH WORKSPACE / 03','查看收益曲线与每一笔成交。','选择回测区间和运行方式，验证策略表现。'],history:['RESEARCH WORKSPACE / 04','随时找回过去的回测。','重新打开完整报告，核对当时的策略与行情来源。']};
-const agentModels={deepseek:'deepseek-flash',gpt:'gpt-5.1',minimax:'MiniMax-M2.7',glm:'glm-5.2',kimi:'kimi-k2.6'};
+const agentModels={
+ deepseek:['deepseek-flash'],
+ gpt:['gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.1'],
+ minimax:['MiniMax-M3','MiniMax-M2.7'],
+ glm_global:['glm-5.3','glm-5.2'],glm:['glm-5.2'],
+ kimi_global:['kimi-k3','kimi-k2.7-code','kimi-k2.6'],kimi:['kimi-k2.6']
+};
+const agentProviderNotes={
+ deepseek:'deepseek-flash 当前对应 V4.1 Flash。',
+ gpt:'OpenAI API 单独计费；ChatGPT Pro 不包含 API 额度。',
+ minimax:'请选择 MiniMax API 平台的密钥。',
+ glm_global:'需要 Z.ai 国际站的密钥；国内智谱密钥请切换到“国内站”。',
+ glm:'需要智谱国内站密钥；较新的 GLM-5.3 请使用 Z.ai 国际站。',
+ kimi_global:'需要 Kimi 国际站的密钥；国内站密钥请切换到“国内站”。',
+ kimi:'需要 Kimi 国内站密钥；K3 请使用国际站。'
+};
+function updateAgentModels(){const provider=$('agent-provider').value,models=agentModels[provider];
+ $('agent-model').innerHTML=opts([...models,'__custom__'],models[0],{__custom__:'自定义模型 ID…'});
+ $('agent-provider-note').textContent=agentProviderNotes[provider];$('agent-custom-model').value='';
+ $('agent-custom-model-field').classList.add('hidden');}
 const opts = (values, selected, labels={}) => values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(labels[v]||v)}</option>`).join('');
 const refs = () => [...Object.keys(names),...Object.keys(state.config.indicators)];
 const setStatus = (text,type='') => { $('status').textContent=text; $('status').className=type; };
@@ -167,10 +186,13 @@ $('user-code').addEventListener('input',()=>{state.codeDrafts[state.currentCodeE
 $('load-code-example').onclick=()=>{const engine=$('code-engine').value;state.codeDrafts[engine]=state.codeExamples[engine];$('user-code').value=state.codeExamples[engine];dirty();};
 $('code-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw new Error('代码文件不能超过 100 KB');const engine=file.name.endsWith('.go')?'go':file.name.endsWith('.py')?'python':null;if(!engine)throw new Error('请选择 .py 或 .go 文件');if(engine!==state.currentCodeEngine)switchCodeEngine(engine);state.codeDrafts[engine]=await file.text();$('user-code').value=state.codeDrafts[engine];dirty();}catch(err){setStatus('导入代码失败：'+err.message,'error');}e.target.value='';};
 $('export-code').onclick=()=>download('strategy.'+($('code-engine').value==='go'?'go':'py'),$('user-code').value,'text/plain');
-$('agent-provider').onchange=()=>{$('agent-model').value=agentModels[$('agent-provider').value];};
+$('agent-provider').onchange=updateAgentModels;
+$('agent-model').onchange=()=>{$('agent-custom-model-field').classList.toggle('hidden',$('agent-model').value!=='__custom__');};
 $('agent-generate').onclick=async()=>{const button=$('agent-generate');button.disabled=true;button.textContent='生成中…';setAgentFeedback('正在生成草稿，请稍候…');
  try{if(!$('agent-prompt').value.trim())throw new Error('请先描述你的策略规则');if(!$('agent-key').value.trim())throw new Error('请填写所选模型服务的 API Key');
-  const config=collect();const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value,context:{universe:config.universe,benchmark:config.benchmark,max_positions:config.selection.max_positions}};
+  const model=$('agent-model').value==='__custom__' ? $('agent-custom-model').value.trim() : $('agent-model').value;
+  if(!model)throw new Error('请填写自定义模型 ID');
+  const config=collect();const payload={provider:$('agent-provider').value,model,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value,context:{universe:config.universe,benchmark:config.benchmark,max_positions:config.selection.max_positions}};
   const response=await fetch('/api/agent/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'生成失败');
   $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;document.querySelector('.code-pane').classList.add('code-generated');
   setAgentFeedback('草稿已放入代码编辑器。请检查交易逻辑，再运行回测。','success');setStatus('已用 '+result.skill+' 生成代码草稿。请检查交易逻辑后再运行回测。','success');
@@ -187,4 +209,4 @@ $('data-source').onchange=e=>{try{switchSource(e.target.value);if(e.target.value
 $('csv-file').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;if(f.size>8*1024*1024)throw new Error('CSV 文件请小于 8 MB');const text=await f.text();const rows=csvRows(text.replace(/^\uFEFF/,''));const header=rows.shift()||[];const col=header.indexOf('symbol'),dateCol=header.indexOf('date');if(col<0||dateCol<0||!rows.length)throw new Error('需要 date、symbol 和 OHLCV 列');const symbols=[...new Set(rows.map(r=>r[col]))].sort(),days=[...new Set(rows.map(r=>r[dateCol]))].sort();state.modeDrafts[state.dataMode]=collect();state.config=clone(state.modeDrafts[state.dataMode]);state.csv=text;state.dataMode='uploaded';$('uploaded-option').disabled=false;state.config.universe=symbols.slice(0,3);state.config.benchmark=symbols[0];state.config.start=days[0];state.config.end=days.at(-1);state.config.selection.max_positions=Math.min(state.config.selection.max_positions,state.config.universe.length);render();updateSourceLabel();$('data-name').textContent=`${f.name} · ${days.length} 天 · ${symbols.length} 个资产`;setStatus('行情已导入。默认选取前 3 个资产，可在资产代码中调整。');dirty();}catch(err){setStatus('导入失败：'+err.message,'error');}e.target.value='';};
 $('reset-data').onclick=()=>{try{switchSource('synthetic_demo');setStatus('已切换到合成演示数据；此数据不能用于判断策略收益。');}catch(e){setStatus(e.message,'error');}};
 document.querySelector('.workspace').addEventListener('input',dirty);
-(async()=>{try{$('run').disabled=true;const [presets,examples]=await Promise.all([fetch('/api/presets'),fetch('/api/code-examples')]);if(!presets.ok||!examples.ok)throw new Error('无法读取模板');state.presets=await presets.json();state.codeExamples=await examples.json();state.config=marketDefaults(state.presets.trend);render();updateSourceLabel();$('user-code').value=codeFor('python');$('agent-model').value=agentModels.deepseek;page('code');$('run').disabled=false;try{const ready=await (await fetch('/api/market/status')).json();setStatus(ready.ready?'PostgreSQL 已就绪。真实行情回测会先查库，再按需更新。':ready.message,'ready' in ready&&!ready.ready?'error':'');}catch(e){setStatus('无法检查数据库状态：'+e.message,'error');}}catch(e){setStatus('初始化失败：'+e.message,'error');}})();
+(async()=>{try{$('run').disabled=true;const [presets,examples]=await Promise.all([fetch('/api/presets'),fetch('/api/code-examples')]);if(!presets.ok||!examples.ok)throw new Error('无法读取模板');state.presets=await presets.json();state.codeExamples=await examples.json();state.config=marketDefaults(state.presets.trend);render();updateSourceLabel();$('user-code').value=codeFor('python');updateAgentModels();page('code');$('run').disabled=false;try{const ready=await (await fetch('/api/market/status')).json();setStatus(ready.ready?'PostgreSQL 已就绪。真实行情回测会先查库，再按需更新。':ready.message,'ready' in ready&&!ready.ready?'error':'');}catch(e){setStatus('无法检查数据库状态：'+e.message,'error');}}catch(e){setStatus('初始化失败：'+e.message,'error');}})();

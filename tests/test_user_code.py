@@ -36,6 +36,30 @@ class CustomStrategyTests(unittest.TestCase):
 
 
 class AgentGenerationTests(unittest.TestCase):
+    def test_provider_defaults_use_documented_endpoint_and_model(self):
+        expected = {
+            'deepseek': ('https://api.deepseek.com/chat/completions', 'deepseek-flash'),
+            'gpt': ('https://api.openai.com/v1/chat/completions', 'gpt-5.6-sol'),
+            'minimax': ('https://api.minimax.io/v1/chat/completions', 'MiniMax-M3'),
+            'glm': ('https://open.bigmodel.cn/api/paas/v4/chat/completions', 'glm-5.2'),
+            'glm_global': ('https://api.z.ai/api/paas/v4/chat/completions', 'glm-5.3'),
+            'kimi': ('https://api.moonshot.cn/v1/chat/completions', 'kimi-k2.6'),
+            'kimi_global': ('https://api.moonshot.ai/v1/chat/completions', 'kimi-k3'),
+        }
+        for provider, (endpoint, model) in expected.items():
+            with self.subTest(provider=provider):
+                requests = []
+                def opener(request, timeout):
+                    requests.append(request)
+                    return io.BytesIO(json.dumps({'choices':[{'message':{
+                        'content':'def decide(ctx): return []'}}]}).encode())
+                result = generate({'provider':provider, 'engine':'python',
+                                   'api_key':'test-token-only',
+                                   'prompt':'按照历史收盘价决定下一交易日持仓'}, opener=opener)
+                self.assertEqual(requests[0].full_url, endpoint)
+                self.assertEqual(json.loads(requests[0].data)['model'], model)
+                self.assertEqual(result['model'], model)
+
     def test_fixed_provider_and_key_not_returned(self):
         captured = []
         def opener(request, timeout):
