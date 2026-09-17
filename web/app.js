@@ -6,10 +6,12 @@ const names = {open:'开盘价',high:'最高价',low:'最低价',close:'收盘�
 const kinds = {sma:'SMA 均线',ema:'EMA 指数均线',rsi:'RSI 相对强弱',macd:'MACD',roc:'ROC 涨跌幅 %',momentum_score:'加权动量评分',atr:'ATR 真实波幅',highest:'窗口最高值',lowest:'窗口最低值'};
 const operators = {gt:'大于 >',gte:'大于等于 ≥',lt:'小于 <',lte:'小于等于 ≤',eq:'等于 =',cross_above:'向上穿越 ↑',cross_below:'向下穿越 ↓'};
 const state = {config:null,presets:{},csv:null,dataMode:'market',modeDrafts:{},jsonMode:false,complex:false,report:null,result:null,busy:false,page:'code',strategyMode:'code',codeExamples:{},codeDrafts:{python:'',go:''},currentCodeEngine:'python'};
+const pageMeta={code:['RESEARCH WORKSPACE / 01','把交易想法，变成可检验的规则。','用 Agent 生成草稿，或自己编写 Python / Go 策略。'],simple:['RESEARCH WORKSPACE / 02','用指标组合，定义交易规则。','从模板开始，组合 RSI、MACD、均线等条件。'],run:['RESEARCH WORKSPACE / 03','查看收益曲线与每一笔成交。','选择回测区间和运行方式，验证策略表现。'],history:['RESEARCH WORKSPACE / 04','随时找回过去的回测。','重新打开完整报告，核对当时的策略与行情来源。']};
 const agentModels={deepseek:'deepseek-flash',gpt:'gpt-5.1',minimax:'MiniMax-M2.7',glm:'glm-5.2',kimi:'kimi-k2.6'};
 const opts = (values, selected, labels={}) => values.map(v=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(labels[v]||v)}</option>`).join('');
 const refs = () => [...Object.keys(names),...Object.keys(state.config.indicators)];
 const setStatus = (text,type='') => { $('status').textContent=text; $('status').className=type; };
+const setAgentFeedback = (text,type='') => { $('agent-feedback').textContent=text; $('agent-feedback').className='agent-feedback'+(type?' '+type:''); };
 const dateInChina = () => new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 function marketDates(){const d=new Date(dateInChina()+'T00:00:00Z');d.setUTCDate(d.getUTCDate()-1);const end=d.toISOString().slice(0,10);d.setUTCFullYear(d.getUTCFullYear()-2);return [d.toISOString().slice(0,10),end];}
 function marketDefaults(c){const next=clone(c),[start,end]=marketDates();next.universe=['510300','518880','511010'];next.benchmark='000300';next.start=start;next.end=end;next.selection.max_positions=Math.min(next.selection.max_positions,3);return next;}
@@ -93,6 +95,7 @@ function page(name){
  if(name==='code'||name==='simple')state.strategyMode=name;
  state.page=name;document.body.className='page-'+name;
  document.querySelectorAll('.main-nav [data-page]').forEach(el=>el.classList.toggle('nav-active',el.dataset.page===name));
+ const [kicker,headline,subtitle]=pageMeta[name];$('page-kicker').textContent=kicker;$('page-headline').textContent=headline;$('page-subtitle').textContent=subtitle;
  $('history-page').classList.toggle('hidden',name!=='history');
  $('builder-title').textContent=name==='simple'?'简单策略':'策略输入';$('builder-tag').textContent=name==='simple'?'无需编程':'Python / Go';
  if(name==='history')loadHistory();
@@ -156,19 +159,22 @@ function csvRows(text){const rows=[];let row=[],cell='',quoted=false;for(let i=0
 $('visual-tab').onclick=()=>tab(false);$('json-tab').onclick=()=>tab(true);$('apply-json').onclick=()=>tab(false);
 $('run').onclick=run;
 document.querySelectorAll('.main-nav [data-page]').forEach(el=>el.onclick=()=>page(el.dataset.page));
+$('agent-shortcut').onclick=()=>{page('code');$('agent-prompt').scrollIntoView({behavior:'smooth',block:'center'});$('agent-prompt').focus({preventScroll:true});};
 $('code-next').onclick=()=>page('run');$('simple-next').onclick=()=>page('run');$('refresh-history').onclick=loadHistory;
 $('code-engine').onchange=e=>switchCodeEngine(e.target.value);
 $('engine').onchange=e=>{if(state.strategyMode==='code')switchCodeEngine(e.target.value);};
-$('user-code').addEventListener('input',()=>{state.codeDrafts[state.currentCodeEngine]=$('user-code').value;dirty();});
+$('user-code').addEventListener('input',()=>{state.codeDrafts[state.currentCodeEngine]=$('user-code').value;document.querySelector('.code-pane').classList.remove('code-generated');dirty();});
 $('load-code-example').onclick=()=>{const engine=$('code-engine').value;state.codeDrafts[engine]=state.codeExamples[engine];$('user-code').value=state.codeExamples[engine];dirty();};
 $('code-file').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>100000)throw new Error('代码文件不能超过 100 KB');const engine=file.name.endsWith('.go')?'go':file.name.endsWith('.py')?'python':null;if(!engine)throw new Error('请选择 .py 或 .go 文件');if(engine!==state.currentCodeEngine)switchCodeEngine(engine);state.codeDrafts[engine]=await file.text();$('user-code').value=state.codeDrafts[engine];dirty();}catch(err){setStatus('导入代码失败：'+err.message,'error');}e.target.value='';};
 $('export-code').onclick=()=>download('strategy.'+($('code-engine').value==='go'?'go':'py'),$('user-code').value,'text/plain');
 $('agent-provider').onchange=()=>{$('agent-model').value=agentModels[$('agent-provider').value];};
-$('agent-generate').onclick=async()=>{const button=$('agent-generate');button.disabled=true;button.textContent='生成中…';
- try{const config=collect();const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value,context:{universe:config.universe,benchmark:config.benchmark,max_positions:config.selection.max_positions}};
+$('agent-generate').onclick=async()=>{const button=$('agent-generate');button.disabled=true;button.textContent='生成中…';setAgentFeedback('正在生成草稿，请稍候…');
+ try{if(!$('agent-prompt').value.trim())throw new Error('请先描述你的策略规则');if(!$('agent-key').value.trim())throw new Error('请填写所选模型服务的 API Key');
+  const config=collect();const payload={provider:$('agent-provider').value,model:$('agent-model').value,api_key:$('agent-key').value,prompt:$('agent-prompt').value,engine:$('code-engine').value,context:{universe:config.universe,benchmark:config.benchmark,max_positions:config.selection.max_positions}};
   const response=await fetch('/api/agent/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(result.error||'生成失败');
-  $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;setStatus('已用 '+result.skill+' 生成代码草稿。请检查交易逻辑后再运行回测。','success');
- }catch(error){setStatus('生成失败：'+error.message,'error');}finally{button.disabled=false;button.textContent='生成代码草稿';}};
+  $('user-code').value=result.code;state.codeDrafts[result.engine]=result.code;document.querySelector('.code-pane').classList.add('code-generated');
+  setAgentFeedback('草稿已放入代码编辑器。请检查交易逻辑，再运行回测。','success');setStatus('已用 '+result.skill+' 生成代码草稿。请检查交易逻辑后再运行回测。','success');
+ }catch(error){setAgentFeedback('生成失败：'+error.message,'error');setStatus('生成失败：'+error.message,'error');}finally{button.disabled=false;button.textContent='生成代码草稿 →';}};
 $('preset').onchange=()=>{try{let old=state.config?collect():null;state.config=clone(state.presets[$('preset').value]);if(state.dataMode!=='synthetic_demo'&&old){state.config.universe=old.universe;state.config.benchmark=old.benchmark;state.config.start=old.start;state.config.end=old.end;state.config.selection.max_positions=Math.min(state.config.selection.max_positions,old.universe.length);}render();updateSourceLabel();dirty();}catch(e){setStatus(e.message,'error');}};
 document.querySelectorAll('[data-add]').forEach(el=>el.onclick=()=>{try{state.config=collect();const which=el.dataset.add;state.config[which][$(which+'-mode').value].push({left:'rsi14' in state.config.indicators?'rsi14':'close',op:'gt',right:0});renderRules(which);dirty();}catch(e){setStatus(e.message,'error');}});
 $('add-indicator').onclick=()=>{try{state.config=collect();let n=1;while(state.config.indicators['indicator'+n])n++;state.config.indicators['indicator'+n]={kind:'ema',period:20};render();dirty();}catch(e){setStatus(e.message,'error');}};
