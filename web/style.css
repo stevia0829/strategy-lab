@@ -56,3 +56,45 @@ main{max-width:1560px}
 @media(max-width:1080px){.strategy-code-layout{grid-template-columns:1fr}.agent-box,.code-pane{padding:20px}.page-code #code-editor #user-code{min-height:340px}.page-code #code-editor #agent-prompt{min-height:135px}.main-nav{justify-content:flex-start}}
 @media(max-width:900px){header{gap:12px}.header-actions{margin-left:auto}.main-nav{order:3;justify-content:flex-start}.agent-shortcut{padding:9px 12px}}
 @media(max-width:600px){.header-actions{width:100%;justify-content:space-between}.main-nav{order:4}.page-code .builder{padding:16px}.agent-box,.code-pane{padding:16px}.agent-box .two{grid-template-columns:1fr}.code-pane-head{flex-wrap:wrap}.code-footer{align-items:stretch;flex-direction:column}.code-footer #code-next{width:100%}.page-code #code-editor #user-code{min-height:300px}.page-code #code-editor #agent-prompt{min-height:132px}}
+
+/* Live provider output and verifiable Agent stages. */
+.agent-process{margin-top:16px;padding:14px;border:1px solid #bce2d7;border-radius:9px;background:#fff}
+.agent-process-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#25483f;font-size:12px}
+.agent-process-head button{margin:0;padding:6px 10px}
+#agent-steps{margin:12px 0;padding-left:18px;color:#4b665f;font-size:11px;line-height:1.7}
+#agent-steps li+li{margin-top:3px}
+.agent-process details{margin-top:10px;padding-top:10px}
+.agent-process summary{margin:0;color:#315d53;font-size:11px}
+.agent-process pre{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;padding:10px;border-radius:6px;background:#f3f8f6;color:#29453e;font:11px/1.6 ui-monospace,SFMono-Regular,Consolas,monospace}
+#agent-reasoning-text:empty::before{content:'等待模型返回推理分段…';color:#82948e}
+#agent-code-stream:empty::before{content:'等待模型返回代码分段…';color:#82948e}
+.agent-process-note{font-size:10px;line-height:1.6;color:#71867d;margin:11px 0 0}
+.agent-conversation{padding:13px;border:1px solid #bce2d7;border-radius:8px;background:#fff;margin:0 0 17px}
+.agent-conversation .agent-process-head button{margin:0}
+.agent-conversation ol{padding-left:19px;margin:10px 0;color:#35584f}
+.agent-conversation li{padding:7px 0;font-size:11px;line-height:1.6}
+.agent-conversation li+li{border-top:1px solid var(--line)}
+.agent-conversation li p{margin:0 0 5px;white-space:pre-wrap;overflow-wrap:anywhere}
+.agent-conversation details{margin:0;padding:0;border:0}
+.agent-conversation summary{font-size:10px;color:var(--teal);font-weight:500;margin:0}
+.agent-conversation pre{max-height:180px;overflow:auto;background:#f4f8f6;padding:9px;white-space:pre-wrap;overflow-wrap:anywhere;font:10px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+.agent-conversation .muted{margin:9px 0 0}
+.agent-backtest{padding:13px;margin:0 0 17px;border:1px solid #bce2d7;border-radius:8px;background:#fff}
+.agent-backtest p{margin:9px 0 5px;color:#25483f;font-size:12px;line-height:1.6}
+.agent-backtest small{color:#71867d;font-size:10px;line-height:1.5}
+
+.report-intro{display:flex;align-items:center;gap:12px;margin-bottom:15px}
+.report-intro .run-summary{flex:1;margin:0}
+.report-intro button{white-space:nowrap;align-self:stretch}
+.data-alert{padding:13px 15px;margin:0 0 16px;border:1px solid #e7a498;border-radius:8px;background:#fff2ef;color:#8b3028;font-size:12px;line-height:1.7}
+.strategy-details{padding:21px 24px;margin-bottom:16px}
+.strategy-details>.muted{margin:-8px 0 17px}
+.strategy-detail-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0}
+.strategy-detail-facts>div{padding:11px 12px;border:1px solid var(--line);border-radius:7px;min-width:0}
+.strategy-detail-facts dt{font-size:10px;color:var(--muted);margin-bottom:6px}
+.strategy-detail-facts dd{font-size:12px;color:var(--ink);font-weight:600;margin:0;overflow-wrap:anywhere}
+.strategy-details .notice{margin:16px 0}
+.strategy-details h3{font-size:13px;margin:18px 0 10px}
+.strategy-detail-code{max-height:560px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#172630;color:#e5f3ef;padding:16px;border-radius:8px;font:12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;margin:0}
+@media(max-width:740px){.report-intro{align-items:stretch;flex-direction:column}.strategy-detail-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:450px){.strategy-detail-facts{grid-template-columns:1fr}}

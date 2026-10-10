@@ -15,5 +15,29 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+  worker:
+    build: .
+    image: strategy-lab:local
+    command: ["python", "-B", "worker.py"]
+    network_mode: none
+    user: "${STRATEGYLAB_UID:-501}:${STRATEGYLAB_GID:-20}"
+    environment:
+      STRATEGYLAB_JOBS_DIR: /jobs
+    volumes:
+      - ./.jobs:/jobs
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.access('/jobs', os.R_OK | os.W_OK) else 1)"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 volumes:
   strategy_lab_postgres:

@@ -284,6 +284,23 @@ def metrics(equity, closed, fills, initial, costs, turnover):
             'sessions': n, 'final_equity': values[-1]}
 
 
+def price_jump_warnings(data, needed, last_session):
+    """Flag large close gaps that may be splits or bad adjustment data."""
+    warnings, count = [], 0
+    for symbol in sorted(needed):
+        days = sorted(day for day in data[symbol] if day <= last_session)
+        for previous, current in zip(days, days[1:]):
+            ratio = data[symbol][current]['close'] / data[symbol][previous]['close']
+            if ratio < .65 or ratio > 1.35:
+                count += 1
+                if len(warnings) < 8:
+                    warnings.append('行情疑似未正确复权：' + symbol + ' 在 ' + current +
+                                    ' 相对前一日收盘跳变超过 35%；请核对拆分、合并或分红。')
+    if count > 8:
+        warnings.append('另外还有 ' + str(count - 8) + ' 处超过 35% 的价格跳变，请核对完整行情。')
+    return warnings
+
+
 def run(strategy, csv_text, decide=None):
     s = validate(strategy); data = read_csv(csv_text)
     universe = sorted(s['universe']); needed = sorted(set(universe + [s['benchmark']]))
@@ -390,10 +407,12 @@ def run(strategy, csv_text, decide=None):
                       'positions': {c: p['quantity'] for c, p in sorted(positions.items())}})
         pending = targets(day, equity); signals.append({'date': day, 'targets': pending})
         previous = day
+    warnings = ['Synthetic/demo data is not investment evidence.' if any(c.startswith('DEMO') for c in needed) else 'Data adjustments, survivorship and calendar quality are the data provider responsibility.',
+                'Open positions are marked to close at the end; no forced liquidation.',
+                'Exposure cap applies at entry; existing holdings are not rebalanced daily.']
+    warnings.extend(price_jump_warnings(data, needed, dates[-1]))
     return {'engine': 'python', 'engine_version': VERSION, 'strategy_name': s['name'],
             'data_sha256': hashlib.sha256(csv_text.encode()).hexdigest(),
             'metrics': metrics(curve, closed, fills, initial, costs, turnover),
             'equity': curve, 'fills': fills, 'closed': closed, 'rejected': rejected, 'signals': signals,
-            'warnings': ['Synthetic/demo data is not investment evidence.' if any(c.startswith('DEMO') for c in needed) else 'Data adjustments, survivorship and calendar quality are the data provider responsibility.',
-                         'Open positions are marked to close at the end; no forced liquidation.',
-                         'Exposure cap applies at entry; existing holdings are not rebalanced daily.']}
+            'warnings': warnings}

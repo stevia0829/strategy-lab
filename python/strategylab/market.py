@@ -223,8 +223,8 @@ def ensure_schema(conn):
 def load_market(strategy, *, provider=None, connection=None, now=None):
     """Return engine-ready CSV plus provenance. No synthetic fallback on failure."""
     symbols = sorted(set(strategy['universe']) | {strategy['benchmark']})
-    if len(symbols) > 50:
-        raise MarketDataError('单次公开行情查询最多 50 个资产')
+    if len(symbols) > 100:
+        raise MarketDataError('单次公开行情查询最多 100 个代码（含基准）')
     for symbol in symbols:
         symbol_market(symbol)
     begin, end = warmup_start(strategy)

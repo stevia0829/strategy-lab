@@ -1,4 +1,4 @@
-"""Persistent backtest records. Credentials and model prompts are never stored."""
+"""Persistent backtest records, including strategy generation turns but no API credentials."""
 import uuid
 
 from strategylab.market import connect_db

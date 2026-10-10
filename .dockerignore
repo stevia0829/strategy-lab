@@ -16,3 +16,6 @@ dist
 tests
 docs
 schema
+
+.python
+.jobs

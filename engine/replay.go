@@ -74,6 +74,32 @@ type Context struct {
 
 type TargetDecider func(Context) ([]string, error)
 
+func priceJumpWarnings(data map[string]map[string]Bar, needed map[string]bool, lastSession string) []string {
+	warnings := []string{}
+	count := 0
+	for _, symbol := range sortedKeys(needed) {
+		days := []string{}
+		for _, day := range sortedKeys(data[symbol]) {
+			if day <= lastSession {
+				days = append(days, day)
+			}
+		}
+		for i := 1; i < len(days); i++ {
+			ratio := data[symbol][days[i]].Close / data[symbol][days[i-1]].Close
+			if ratio < 0.65 || ratio > 1.35 {
+				count++
+				if len(warnings) < 8 {
+					warnings = append(warnings, "行情疑似未正确复权："+symbol+" 在 "+days[i]+" 相对前一日收盘跳变超过 35%；请核对拆分、合并或分红。")
+				}
+			}
+		}
+	}
+	if count > 8 {
+		warnings = append(warnings, fmt.Sprintf("另外还有 %d 处超过 35%% 的价格跳变，请核对完整行情。", count-8))
+	}
+	return warnings
+}
+
 // Run executes yesterday's close signals at the next calendar session's open.
 func Run(s Strategy, text string) (Result, error) {
 	return RunWithTargets(s, text, nil)
@@ -374,6 +400,7 @@ func RunWithTargets(s Strategy, text string, decide TargetDecider) (Result, erro
 		warning = "Synthetic/demo data is not investment evidence."
 	}
 	r.Warnings = []string{warning, "Open positions are marked to close at the end; no forced liquidation.", "Exposure cap applies at entry; existing holdings are not rebalanced daily."}
+	r.Warnings = append(r.Warnings, priceJumpWarnings(data, needed, dates[len(dates)-1])...)
 	return r, nil
 }
 func summarize(r Result, initial, costs, turnover float64) map[string]any {

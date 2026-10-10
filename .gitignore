@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
+.python/
+.jobs/
 .motor-code/
 build/
 dist/

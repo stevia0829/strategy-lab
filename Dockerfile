@@ -13,8 +13,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH=/usr/local/go/bin:$PATH \
     HOME=/tmp
 WORKDIR /app
-RUN python -m pip install --no-cache-dir 'psycopg[binary]>=3.2,<3.3'
-COPY server.py worker.py agent_codegen.py history.py job_queue.py ./
+RUN python -m pip install --no-cache-dir 'psycopg[binary]>=3.2,<3.3' 'langgraph>=1.0,<2'
+COPY server.py worker.py agent_codegen.py history.py job_queue.py code_symbols.py ./
 COPY .agents/skills/strategy-lab-script/SKILL.md ./.agents/skills/strategy-lab-script/SKILL.md
 COPY custom/ ./custom/
 COPY go.mod ./

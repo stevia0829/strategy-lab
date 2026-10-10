@@ -90,6 +90,21 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(r['metrics']['closed_trades'],0)
         self.assertIsNone(r['metrics']['win_rate'])
 
+    def test_large_close_gap_warns_without_rewriting_return(self):
+        data=bars_csv([(10,10),(10,10),(5,5)])
+        r=run(config(),data)
+        self.assertTrue(any('A 在 2024-01-03' in warning for warning in r['warnings']))
+        self.assertEqual(r['equity'][-1]['equity'],500)
+        self.assertAlmostEqual(r['metrics']['total_return'],-.5)
+        self.assertTrue(compare(run_engine('go',config(),data),r)['match'])
+
+    def test_price_jump_after_selected_end_is_not_reported(self):
+        s=config();s['end']='2024-01-03'
+        data=bars_csv([(10,10),(10,10),(10,10),(5,5)])
+        r=run(s,data)
+        self.assertFalse(any(w.startswith('行情疑似未正确复权：') for w in r['warnings']))
+        self.assertTrue(compare(run_engine('go',s,data),r)['match'])
+
     def test_fee_slippage_lots_no_cash_borrowing(self):
         s=config();s['execution'].update(commission_rate=.01,min_commission=5,slippage=.01,lot_size=10)
         r=run(s,bars_csv([(10,10),(10,10)]));f=r['fills'][0]

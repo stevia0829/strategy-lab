@@ -10,7 +10,7 @@ import uuid
 def run_code(engine, strategy, csv_text, code):
     base = os.environ.get('STRATEGYLAB_JOBS_DIR')
     if not base:
-        raise ValueError('代码回测需要隔离 worker；请使用 compose.deploy.yaml 启动')
+        raise ValueError('代码回测需要隔离 worker；本机请先运行 make setup-market，服务器请使用 compose.deploy.yaml 启动')
     if engine not in ('python', 'go'):
         raise ValueError('请选择 Python 或 Go')
     if not isinstance(code, str) or not code.strip() or len(code.encode('utf-8')) > 100_000 or '\x00' in code:

@@ -23,9 +23,10 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'python'))
 from strategylab.engine import validate
 from strategylab.market import load_market, connect_db
-from agent_codegen import generate
+from agent_codegen import generate, generate_stream, validate_agent_turns
 from history import get_run, list_runs, save_run
 from job_queue import run_code
+from code_symbols import include_code_symbols
 SLOTS = threading.BoundedSemaphore(2)
 SESSION_TTL_SECONDS = 12 * 60 * 60
 
@@ -127,6 +128,20 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers(); self.wfile.write(body)
 
+    def start_agent_stream(self):
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+        self.send_header('Cache-Control', 'no-cache, no-transform')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Accel-Buffering', 'no')
+        self.send_header('Connection', 'close')
+        self.end_headers()
+
+    def send_agent_event(self, event):
+        data = json.dumps(event, ensure_ascii=False, allow_nan=False)
+        self.wfile.write(('data: ' + data + '\n\n').encode())
+        self.wfile.flush()
+
     def do_GET(self):
         path = urlsplit(self.path).path
         if path == '/' and not self.authorized():
@@ -166,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlsplit(self.path).path
-        if path not in ('/api/login','/api/run','/api/agent/generate'):
+        if path not in ('/api/login','/api/run','/api/agent/generate','/api/agent/stream'):
             return self.send(404,{'error':'not found'})
         if path != '/api/login' and not self.authorized():
             return self.send(401, {'error':'请先登录'})
@@ -198,12 +213,25 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload,dict): raise ValueError('request must be an object')
             if path == '/api/agent/generate':
                 return self.send(200,generate(payload))
+            if path == '/api/agent/stream':
+                self.start_agent_stream()
+                try:
+                    generate_stream(payload, self.send_agent_event)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                except (ValueError, KeyError, TypeError, OSError) as error:
+                    try: self.send_agent_event({'type':'error','message':str(error)})
+                    except (BrokenPipeError, ConnectionResetError): pass
+                return
             mode = payload.get('engine','python')
             if mode not in ('go','python'): raise ValueError('unknown engine')
             strategy = validate(payload['strategy'])
             source = payload.get('source') or ('uploaded' if payload.get('csv') is not None else 'synthetic_demo')
             if source not in ('synthetic_demo','uploaded','market'):
                 raise ValueError('unknown data source')
+            code = payload.get('user_code')
+            if code is not None and source == 'market':
+                strategy = validate(include_code_symbols(strategy, code, mode))
             if source == 'market':
                 if payload.get('csv') is not None: raise ValueError('market request cannot include CSV')
                 csv_text, source_meta = load_market(strategy)
@@ -212,12 +240,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(csv_text,str): raise ValueError('csv must be text')
             else:
                 csv_text, source_meta = (ROOT/'examples/demo.csv').read_bytes().decode('utf-8'), None
-            code = payload.get('user_code')
+            agent_turns = validate_agent_turns(payload.get('agent_turns')) if code is not None else []
             output = run_code(mode,strategy,csv_text,code) if code is not None else run_engine(mode,strategy,csv_text)
             canonical = json.dumps(strategy,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
             bundle = {'strategy':strategy,'strategy_sha256':hashlib.sha256(canonical).hexdigest(),
                       'strategy_mode':'code' if code is not None else 'simple',
                       'user_code':code,'code_sha256':hashlib.sha256(code.encode()).hexdigest() if code is not None else None,
+                      'agent_turns':agent_turns,
                       'source':source,'source_meta':source_meta,'result':output}
             try: bundle['run_id'] = save_run(bundle)
             except (ValueError, OSError) as error: bundle['history_error'] = str(error)
